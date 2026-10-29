@@ -20,6 +20,7 @@ MAX_STEPS = 30
 MAX_SCREENSHOTS = 12
 MAX_OVERVIEW_CHARS = 24_000  # roughly 6 000 tokens
 MAX_DETAIL_LINKS = 80
+MAX_DETAIL_FINDINGS = 40
 # (page groups, top issues, worst pages), tried in order until the overview fits
 OVERVIEW_SIZES = [(30, 20, 15), (20, 15, 10), (10, 10, 8), (5, 5, 5)]
 
@@ -44,7 +45,7 @@ finding is already recorded and graded. You review the results:
 - Use page_details on the pages that best show the site's biggest problems: the worst pages, \
 and one page from each page group that has issues.
 - Screenshot pages with critical or high issues (at most {shots}).
-- Call finish with a short summary for the site owner.
+- Call finish with a short summary for the site owner. If robots.txt blocked pages, say so.
 Keep any text between tool calls to one short sentence."""
 
 
@@ -68,6 +69,7 @@ def _overview(crawl: CrawlResult, groups_n: int, issues_n: int, worst_n: int) ->
             "status_codes": dict(Counter(str(p.status) for p in crawl.pages.values())),
             "links_checked": len(crawl.link_status),
             "broken_links": broken,
+            "blocked_by_robots_txt": crawl.robots_blocked,
             "by_severity": {s: sum(1 for f in findings if f.severity == s) for s in SEVERITIES},
             "by_category": dict(Counter(f.category for f in findings)),
         },
@@ -82,7 +84,7 @@ def build_overview(crawl: CrawlResult, max_chars: int = MAX_OVERVIEW_CHARS) -> d
     """A size-capped summary of the whole crawl, so Claude's cost doesn't grow with the site."""
     for sizes in OVERVIEW_SIZES:
         overview = _overview(crawl, *sizes)
-        if len(json.dumps(overview)) <= max_chars:
+        if len(json.dumps(overview, indent=1)) <= max_chars:  # measured as it's sent
             return overview
     return overview
 
@@ -108,7 +110,7 @@ class Analyst(ToolAgent):
             return {"error": f"{url} wasn't crawled. Use a URL from the overview."}, ""
         page = self.crawl.pages[key]
         findings = [{"id": f.id, "severity": f.severity, "title": f.title,
-                     "evidence": _trim(f.evidence)} for f in page.findings]
+                     "evidence": _trim(f.evidence)} for f in page.findings[:MAX_DETAIL_FINDINGS]]
         if page.error:
             return {"url": key, "failed_to_load": page.error, "findings": findings}, "failed page"
         page_links = []
@@ -123,6 +125,8 @@ class Analyst(ToolAgent):
         }, f"{len(page.findings)} issues"
 
     def _tool_screenshot(self, url: str):
+        if self._known(url) is None:
+            return {"error": f"{url} wasn't crawled. Use a URL from the overview."}, ""
         taken = sum(1 for paths in self.screenshots.values() for p in paths if "desktop" in p)
         if taken >= MAX_SCREENSHOTS:
             return {"error": f"Screenshot limit of {MAX_SCREENSHOTS} reached."}, ""

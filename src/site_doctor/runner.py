@@ -25,8 +25,12 @@ def scan(client, browser, config: ScanConfig,
     on_event(ScanStarted(config.url, config.model, config.max_pages))
     crawl = Crawler(browser, config, on_event).run()
     analyst = Analyst(client, browser, config, crawl, on_event)
-    if crawl.stopped_reason == "interrupted":
-        analyst.partial_reason = "interrupted"
+    loaded = [p for p in crawl.pages.values() if p.error is None]
+    if crawl.stopped_reason in ("interrupted", "browser crashed"):
+        analyst.partial_reason = crawl.stopped_reason
+    elif not loaded:  # nothing to review, and a grade would be a lie
+        errors = [p.error for p in crawl.pages.values()]
+        analyst.partial_reason = f"the site didn't load ({errors[0] if errors else 'no pages'})"
     else:
         analyst.guard(analyst.run)
     return build_result(analyst, started=started, t0=t0, pages=list(crawl.pages.values()),

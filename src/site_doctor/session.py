@@ -206,7 +206,10 @@ def build_result(agent: ToolAgent, *, started: datetime, t0: float, pages: list[
     summary = agent.notes
     if groups and not partial:
         agent.emit(TriageStarted(len(groups)))
-        summary = agent.explain(groups, summary)
+        try:
+            summary = agent.explain(groups, summary)
+        except KeyboardInterrupt:  # keep everything found so far
+            agent.partial_reason, partial = "interrupted", True
     scores, overall, grade = score(groups)
     agent.emit(ScanFinished(partial, agent.partial_reason))
     config = agent.config

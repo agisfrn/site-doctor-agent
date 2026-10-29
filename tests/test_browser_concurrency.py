@@ -60,3 +60,20 @@ def test_call_is_interruptible(browser):
         browser._call(asyncio.sleep(10))
     assert time.perf_counter() - start < 2
     timer.cancel()
+
+
+def test_browser_ignores_console_signals_and_exits_cleanly(monkeypatch):
+    # Ctrl+C must reach Python only: if the Node driver also gets it, it kills the browser,
+    # closing fails, and the partial report is never written.
+    from site_doctor import browser as browser_mod
+
+    real_stop = browser_mod._Engine.stop
+
+    async def stop_then_fail(self):
+        await real_stop(self)
+        raise RuntimeError("Connection closed while reading from the driver")
+
+    monkeypatch.setattr(browser_mod._Engine, "stop", stop_then_fail)
+    with Browser(mobile=False) as b:
+        assert b._engine.launch_options["handle_sigint"] is False
+    # leaving the block didn't raise

@@ -103,6 +103,10 @@ class PageLoadError(Exception):
     """The page could not be loaded at all."""
 
 
+class BrowserCrashed(PageLoadError):
+    """Chromium or the Playwright driver died: no further page can load."""
+
+
 class NotAPage(PageLoadError):
     """The URL answered, but with something that isn't an HTML page (image, PDF, feed...)."""
 
@@ -124,6 +128,7 @@ AXE_JS = """async () => {
 
 
 HTML_TYPES = {"text/html", "application/xhtml+xml"}
+HEAD_RECHECK = {400, 403, 404, 405, 501}  # HEAD answers worth confirming with a GET
 MAX_SIZED_REQUESTS = 300
 
 
@@ -166,7 +171,11 @@ class _Engine:
 
     async def start(self) -> None:
         self._pw = await async_playwright().start()
-        self._browser = await self._pw.chromium.launch(channel="chromium")
+        # Console signals (Ctrl+C) go to Python only. Otherwise the driver closes the browser
+        # itself on Ctrl+C and the partial report can't be finished.
+        self.launch_options = {"channel": "chromium", "handle_sigint": False,
+                               "handle_sigterm": False, "handle_sighup": False}
+        self._browser = await self._pw.chromium.launch(**self.launch_options)
         self._ctx = await self._browser.new_context(**DESKTOP)
         self._mobile_ctx = await self._browser.new_context(**MOBILE) if self.mobile else None
         self._tabs = asyncio.Semaphore(self.concurrency)
@@ -174,8 +183,11 @@ class _Engine:
         self._per_host: dict[str, asyncio.Semaphore] = defaultdict(lambda: asyncio.Semaphore(2))
 
     async def stop(self) -> None:
-        await self._browser.close()
-        await self._pw.stop()
+        for close in (self._browser.close, self._pw.stop):
+            try:
+                await close()
+            except Exception:  # an already-dead browser mustn't block the report
+                pass
 
     async def _new_page(self, mobile: bool = False) -> Page:
         page = await (self._mobile_ctx if mobile else self._ctx).new_page()
@@ -238,6 +250,8 @@ class _Engine:
         except PageLoadError as e:
             return e
         except PlaywrightError as e:
+            if not self._browser.is_connected():
+                return BrowserCrashed(_first_line(e))
             return PageLoadError(_first_line(e))
 
     async def capture_many(self, urls: list[str]) -> dict[str, PageCapture | PageLoadError]:
@@ -290,16 +304,22 @@ class _Engine:
 
     # --- plain HTTP ---------------------------------------------------------------------------
 
-    async def _get(self, url: str):
+    async def _get(self, url: str, method: str = "get"):
         host = urlsplit(url).netloc.lower()
         async with self._fetches, self._per_host[host]:
-            return await self._ctx.request.get(url, timeout=15_000, max_redirects=5)
+            request = getattr(self._ctx.request, method)
+            return await request(url, timeout=15_000, max_redirects=5)
 
     async def fetch_status(self, url: str) -> int | str:
+        """HEAD first, so a link to a big file isn't downloaded; GET to confirm a failure,
+        because some servers answer HEAD wrongly."""
         try:
-            response = await self._get(url)
-            status = response.status
-            await response.dispose()
+            for method in ("head", "get"):
+                response = await self._get(url, method)
+                status = response.status
+                await response.dispose()
+                if status not in HEAD_RECHECK:
+                    break
             return status
         except Exception as e:
             return f"{type(e).__name__}: {_first_line(e)}"
@@ -342,6 +362,8 @@ class Browser:
     def __exit__(self, *exc) -> None:
         try:
             self._call(self._engine.stop())
+        except Exception:  # closing a crashed browser can fail; the results are already safe
+            pass
         finally:
             self._shutdown_loop()
 

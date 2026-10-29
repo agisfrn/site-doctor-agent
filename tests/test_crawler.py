@@ -125,3 +125,42 @@ def test_group_pages_collapses_templates():
 
 def test_normalize_url_drops_tracking_params():                                    # Review Focus 1
     assert normalize_url("https://a.com/x?utm_source=n&id=3&fbclid=z") == "https://a.com/x?id=3"
+
+
+# --- review fixes ----------------------------------------------------------------------------
+
+def test_offsite_redirect_is_a_link_not_a_page():
+    pages = {"https://a.com/": make_capture(url="https://a.com/", final_url="https://a.com/",
+                                            links=["https://a.com/careers"]),
+             "https://a.com/careers": make_capture(url="https://a.com/careers",
+                                                   final_url="https://boards.greenhouse.io/a")}
+    result = Crawler(FakeCrawlBrowser(pages), cfg("https://a.com")).run()
+    assert set(result.pages) == {"https://a.com/"}
+    assert result.link_status["https://a.com/careers"] == 200
+
+
+def test_ignore_robots_still_reads_its_sitemap(browser, crawl_url):
+    assert "/orphan" in paths(Crawler(browser, cfg(crawl_url, ignore_robots=True)).run())
+
+
+def test_disallow_all_is_reported():
+    browser = site(5, texts={"https://a.com/robots.txt": (200, "User-agent: *\nDisallow: /\n")})
+    result = Crawler(browser, cfg("https://a.com")).run()
+    assert len(result.pages) == 1 and result.robots_blocked == 5
+
+
+def test_links_from_pages_come_before_the_sitemap():
+    locs = "".join(f"<url><loc>https://a.com/s{i}</loc></url>" for i in range(20))
+    browser = site(2, texts={"https://a.com/sitemap.xml": (200, f"<urlset>{locs}</urlset>")})
+    result = Crawler(browser, cfg("https://a.com", max_pages=3)).run()
+    assert set(result.pages) == {"https://a.com/", "https://a.com/p0", "https://a.com/p1"}
+
+
+def test_browser_crash_stops_the_crawl():
+    from site_doctor.browser import BrowserCrashed
+
+    browser = site(10)
+    for i in range(10):
+        browser.pages[f"https://a.com/p{i}"] = BrowserCrashed("Target closed")
+    result = Crawler(browser, cfg("https://a.com", concurrency=1)).run()
+    assert result.stopped_reason == "browser crashed" and len(result.pages) == 1

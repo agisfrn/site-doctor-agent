@@ -63,6 +63,13 @@ def test_output_survives_a_non_utf8_console(monkeypatch):
     assert "🩺".encode() in raw.getvalue()
 
 
+def test_dead_site_exits_1_without_a_grade(monkeypatch, tmp_path):
+    monkeypatch.setattr(cli, "Browser", lambda **kw: FakeBrowserCM(pages={}, **kw))
+    monkeypatch.setattr(cli.anthropic, "Anthropic", lambda: FakeClient([]))
+    res = runner.invoke(app, ["scan", "example.com", "--out", str(tmp_path), "--plain"])
+    assert res.exit_code == 1 and "didn't load" in res.output and "Grade" not in res.output
+
+
 def test_missing_credentials_file_explains(monkeypatch, tmp_path):
     from tests.fakes import FakeClient
 
@@ -83,7 +90,8 @@ def test_scan_that_fails_before_any_page_exits_1(monkeypatch, tmp_path):
         "model: claude-typo", response=httpx2.Response(404, request=request), body=None)
     monkeypatch.setattr(cli, "Browser", FakeBrowserCM)
     monkeypatch.setattr(cli.anthropic, "Anthropic", lambda: FakeClient([error]))
-    res = runner.invoke(app, ["scan", "example.com", "--out", str(tmp_path), "--plain"])
+    res = runner.invoke(app, ["scan", "example.com", "--mode", "smart", "--out", str(tmp_path),
+                              "--plain"])
     assert res.exit_code == 1
     assert "claude-typo" in res.output and "Grade" not in res.output
 

@@ -12,7 +12,7 @@ from urllib.robotparser import RobotFileParser
 import defusedxml.ElementTree as ET
 from defusedxml import DefusedXmlException
 
-from .browser import NotAPage, PageLoadError
+from .browser import BrowserCrashed, NotAPage, PageLoadError
 from .checks import basics, links, run_page_checks, seo
 from .config import ScanConfig
 from .events import CrawlProgress, Event
@@ -65,6 +65,10 @@ def group_pages(pages: dict[str, PageResult]) -> list[dict]:
     return sorted(groups, key=lambda g: (-g["pages"], g["pattern"]))
 
 
+class _Stop(Exception):
+    """Ends the crawl early without losing what was collected."""
+
+
 @dataclass
 class CrawlResult:
     pages: dict[str, PageResult]
@@ -74,6 +78,7 @@ class CrawlResult:
     origin: str
     stopped_reason: str = ""
     sitemap_urls: list[str] = field(default_factory=list)
+    robots_blocked: int = 0  # same-site pages robots.txt kept us out of
 
 
 class Crawler:
@@ -92,8 +97,10 @@ class Crawler:
         self.link_status: dict[str, int | str] = {}
         self.findings: list[Finding] = []
         self.sitemap_urls: list[str] = []
-        self.queue: deque[str] = deque()
+        self.queue: deque[str] = deque()  # pages found through links: crawled first
+        self.later: deque[str] = deque()  # pages only the sitemap lists: fill what's left
         self.seen: set[str] = set()
+        self.blocked: set[str] = set()
         self.stopped_reason = ""
         self.robots = RobotFileParser()
 
@@ -101,11 +108,13 @@ class Crawler:
 
     def _load_robots(self) -> list[str]:
         status, text = self.browser.fetch_text(self.origin + "/robots.txt")
-        if self.config.ignore_robots or not (isinstance(status, int) and status < 400):
-            self.robots.allow_all = True
+        if isinstance(status, int) and status < 400:
+            self.robots.parse(text.splitlines())  # also read with --ignore-robots: Sitemap lines
         else:
-            self.robots.parse(text.splitlines())
-        return list(self.robots.site_maps() or []) if isinstance(status, int) else []
+            self.robots.allow_all = True
+        if self.config.ignore_robots:
+            self.robots.allow_all = True
+        return list(self.robots.site_maps() or [])
 
     def _read_sitemaps(self, roots: list[str]) -> None:
         todo, done = [(u, 0) for u in roots], set()
@@ -121,7 +130,9 @@ class Crawler:
                 root = ET.fromstring(text)
             except (ET.ParseError, DefusedXmlException):  # sitemaps are untrusted input
                 continue
-            locs = [(el.text or "").strip() for el in root.iter() if el.tag.split("}")[-1] == "loc"]
+            # <url><loc> and <sitemap><loc> only: not image:loc / video:loc nested deeper
+            locs = [(el.text or "").strip() for entry in root for el in entry
+                    if el.tag.split("}")[-1] == "loc"]
             if root.tag.split("}")[-1] == "sitemapindex":
                 if depth < SITEMAP_DEPTH:
                     todo += [(loc, depth + 1) for loc in locs if loc]
@@ -131,13 +142,28 @@ class Crawler:
 
     def _is_candidate(self, url: str) -> bool:
         path = urlsplit(url).path.lower()
-        return (same_site(url, self.origin) and not path.endswith(SKIP_EXTENSIONS)
-                and self.robots.can_fetch("*", url))
+        if not same_site(url, self.origin) or path.endswith(SKIP_EXTENSIONS):
+            return False
+        if not self.robots.can_fetch("*", url):
+            self.blocked.add(url)
+            return False
+        return True
 
     def _enqueue(self, url: str) -> None:
         if url not in self.seen and self._is_candidate(url):
             self.seen.add(url)
             self.queue.append(url)
+
+    def _next_batch(self, size: int) -> list[str]:
+        if self.queue:
+            return [self.queue.popleft() for _ in range(min(size, len(self.queue)))]
+        batch = []
+        while self.later and len(batch) < size:
+            url = self.later.popleft()
+            if url not in self.seen:
+                self.seen.add(url)
+                batch.append(url)
+        return batch
 
     # --- crawl --------------------------------------------------------------------------------
 
@@ -159,6 +185,9 @@ class Crawler:
         if not self.origin_confirmed:
             self.origin = origin_of(final)  # follow a redirected start URL (http → https, www)
             self.origin_confirmed = True
+        if not same_site(final, self.origin):
+            self.link_status[url] = result.status  # redirects off-site (/careers → a jobs board)
+            return
         self.seen.add(final)
         if final in self.pages:
             return  # a redirect to a page we already have
@@ -176,16 +205,23 @@ class Crawler:
         self._read_sitemaps(sitemap_roots)
         self.seen.add(self.start)
         self.queue.append(self.start)
-        for url in self.sitemap_urls:
-            self._enqueue(normalize_url(url))
+        for url in map(normalize_url, self.sitemap_urls):
+            if self._is_candidate(url):
+                self.later.append(url)
 
-        while self.queue and len(self.pages) < self.config.max_pages:
+        while len(self.pages) < self.config.max_pages:
             room = min(self.config.concurrency, self.config.max_pages - len(self.pages))
-            batch = [self.queue.popleft() for _ in range(min(room, len(self.queue)))]
-            for url, result in self.browser.capture_many(batch).items():
+            batch = self._next_batch(room)
+            if not batch:
+                break
+            results = self.browser.capture_many(batch)
+            if any(isinstance(r, BrowserCrashed) for r in results.values()):
+                self.stopped_reason = "browser crashed"
+                return
+            for url, result in results.items():
                 self._record(url, result)
             self._progress()
-        if self.queue:
+        if self.queue or any(u not in self.seen for u in self.later):
             self.stopped_reason = "page limit"
 
     def _check_links(self) -> None:
@@ -204,11 +240,16 @@ class Crawler:
     def run(self) -> CrawlResult:
         try:
             self._crawl()
+            if self.stopped_reason == "browser crashed":
+                raise _Stop
             self._check_links()
             if self.captured:
                 self.findings += seo.check_site(self.origin, self.browser.fetch_status)
         except KeyboardInterrupt:
             self.stopped_reason = "interrupted"
+        except _Stop:
+            pass
         page_findings = [f for p in self.pages.values() for f in p.findings]
         return CrawlResult(self.pages, page_findings + self.findings, self.link_status,
-                           self.links_from, self.origin, self.stopped_reason, self.sitemap_urls)
+                           self.links_from, self.origin, self.stopped_reason, self.sitemap_urls,
+                           len(self.blocked - set(self.pages)))

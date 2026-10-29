@@ -89,6 +89,9 @@ def run_scan(config: ScanConfig, plain: bool, open_report: bool = False) -> Path
         with (Browser(mobile=config.mobile, concurrency=config.concurrency) as browser,
               make_ui(plain) as ui):
             result = runner.scan(client, browser, config, ui.handle)
+            examined = any(p.error is None for p in result.pages)
+            # Saved before the browser closes: closing after Ctrl+C can be slow.
+            path = write_report(result, config.run_dir) if examined else None
     except (anthropic.AuthenticationError, anthropic.PermissionDeniedError,
             anthropic.CredentialsError):
         _fail(NO_CREDENTIALS)
@@ -97,11 +100,9 @@ def run_scan(config: ScanConfig, plain: bool, open_report: bool = False) -> Path
             _fail(NO_CHROMIUM)
         raise
 
-    if result.partial and not any(p.error is None for p in result.pages):
+    if not examined:
         # Nothing was examined (bad --model, network down...): a grade would be a lie.
         _fail(f"The scan stopped before any page was examined: {result.partial_reason}")
-
-    path = write_report(result, config.run_dir)
     console = Console()
     if result.partial:
         console.print("[yellow]⚠ Partial report: the scan stopped early "

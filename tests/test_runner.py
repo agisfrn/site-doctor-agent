@@ -50,3 +50,29 @@ def test_analyst_api_error_keeps_the_crawl(tmp_path):
                                                                  out_dir=tmp_path))
     assert result.partial and len(result.pages) == 3
     assert "basics.js-error" in {f.id for f in result.findings}
+
+
+def test_dead_site_skips_the_analyst(tmp_path):
+    from site_doctor.browser import PageLoadError
+
+    client = FakeClient([])
+    browser = FakeCrawlBrowser({"https://a.com/": PageLoadError("net::ERR_NAME_NOT_RESOLVED")})
+    result = scan(client, browser, ScanConfig(url="https://a.com/", out_dir=tmp_path))
+    assert client.calls == [] and result.partial and "load" in result.partial_reason
+
+
+def test_crashed_browser_is_partial(tmp_path):
+    from site_doctor.browser import BrowserCrashed
+
+    browser = small_site()
+    browser.pages["https://a.com/p0"] = browser.pages["https://a.com/p1"] = BrowserCrashed("x")
+    client = FakeClient([])
+    result = scan(client, browser, ScanConfig(url="https://a.com/", out_dir=tmp_path,
+                                               concurrency=1))
+    assert result.partial and result.partial_reason == "browser crashed" and client.calls == []
+
+
+def test_ctrl_c_during_explanations_keeps_the_report(tmp_path):
+    client = FakeClient([response(tool_use("finish", summary="S")), KeyboardInterrupt()])
+    result = scan(client, small_site(), ScanConfig(url="https://a.com/", out_dir=tmp_path))
+    assert result.partial and result.partial_reason == "interrupted" and result.groups

@@ -125,9 +125,15 @@ class FakeCrawlBrowser(FakeBrowser):
 
 
 class FakeBrowserCM(FakeCrawlBrowser):
-    """A FakeBrowser that can stand in for `with Browser(mobile=...) as b`."""
+    """A FakeBrowser that can stand in for `with Browser(mobile=...) as b`.
+    By default https://example.com/ loads, so a scan gets as far as calling Claude."""
 
     def __init__(self, mobile=True, pages=None, statuses=None, **kw):
+        if pages is None:
+            from tests.checks.helpers import make_capture
+
+            home = "https://example.com/"
+            pages = {home: make_capture(url=home, final_url=home)}
         super().__init__(pages, statuses)
         self.kw = kw
         self.mobile = mobile
