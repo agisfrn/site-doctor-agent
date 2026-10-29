@@ -64,3 +64,37 @@ class FakeBrowser:
         path.write_bytes(b"\x89PNG\r\n\x1a\n")
         self.shots.append((url, mobile))
         return path
+
+
+class FakeBrowserCM(FakeBrowser):
+    """A FakeBrowser that can stand in for `with Browser(mobile=...) as b`."""
+
+    def __init__(self, mobile=True, pages=None, statuses=None):
+        super().__init__(pages, statuses)
+        self.mobile = mobile
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        pass
+
+
+def browser_raising(message: str):
+    from playwright.sync_api import Error
+
+    class _Browser(FakeBrowserCM):
+        def __enter__(self):
+            raise Error(message)
+
+    return _Browser
+
+
+def raising_auth_error_client():
+    import anthropic
+    import httpx2
+
+    request = httpx2.Request("POST", "https://api.anthropic.com/v1/messages")
+    error = anthropic.AuthenticationError(
+        "invalid x-api-key", response=httpx2.Response(401, request=request), body=None)
+    return FakeClient([error])
