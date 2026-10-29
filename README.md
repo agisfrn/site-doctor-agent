@@ -1,16 +1,17 @@
 # 🩺 Site Doctor
 
-**An AI agent that explores a website like a QA engineer, finds what's broken, and writes a scored report.**
+**An AI agent that scans a whole website like a QA engineer, finds what's broken, and writes a scored report.**
 
 [![CI](https://github.com/panmm942-ui/site-doctor/actions/workflows/ci.yml/badge.svg)](https://github.com/panmm942-ui/site-doctor/actions/workflows/ci.yml)
 ![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)
 ![License: MIT](https://img.shields.io/badge/license-MIT-green)
 
-Point it at a URL. Claude decides which pages are worth visiting, a real Chromium browser loads
-each one, and 29 deterministic rules plus the full axe-core accessibility suite run on every
-page: broken links, JavaScript errors, accessibility, SEO, Core Web Vitals, security headers and
-the phone layout. At the
-end, Claude explains every issue in plain English and suggests a fix.
+Point it at a URL. A crawler loads every page it can find (sitemaps plus every link) in a real
+Chromium browser, several at a time, and checks every link. On each page, 29 deterministic rules
+plus the full axe-core accessibility suite look for broken links, JavaScript errors,
+accessibility, SEO, Core Web Vitals, security headers and phone-layout problems. Then Claude
+reviews the results like an analyst, inspects and screenshots the worst pages, and explains
+every issue in plain English with a fix.
 
 ![Site Doctor scanning the demo site](docs/demo.gif)
 
@@ -23,12 +24,15 @@ end, Claude explains every issue in plain English and suggests a fix.
 
 ```mermaid
 flowchart LR
-    CLI[site-doctor scan URL] --> Agent
-    Agent <-->|tool use| Claude[(Claude)]
-    Agent -->|open_page / check_link / screenshot| Browser[Playwright<br/>desktop + phone]
+    CLI[site-doctor scan URL] --> Crawler
+    Crawler -->|robots.txt, sitemaps, links| Browser[Playwright, 4 tabs<br/>desktop + phone]
     Browser --> Checks[7 check modules<br/>29 rules + axe-core]
     Checks --> Findings
-    Findings --> Triage[Group duplicates]
+    Crawler -->|every link| LinkCheck[Link checks]
+    LinkCheck --> Findings
+    Findings --> Analyst
+    Analyst <-->|tool use: page_details, screenshot| Claude[(Claude)]
+    Analyst --> Triage[Group duplicates]
     Triage -->|one structured call| Claude
     Triage --> Scoring[Rule-based scores]
     Scoring --> Report[report.html<br/>findings.json]
@@ -36,9 +40,12 @@ flowchart LR
 
 Site Doctor splits the job between Claude and plain code:
 
-- **Claude steers.** It reads each page's summary (issue counts, top issues, unvisited links) and
-  decides where to go next, which links to check, and which pages to screenshot, within a page
-  budget.
+- **Code crawls.** The crawler reads robots.txt and sitemaps, follows every same-site link
+  breadth-first (several pages at once), skips files and tracking-parameter duplicates, and
+  checks every unique link once.
+- **Claude reviews.** It gets a compact overview (pages grouped by template, the most widespread
+  issues, the worst pages), digs into the pages that matter and screenshots them. The overview is
+  capped, so Claude's cost stays about the same for 10 pages or 1000.
 - **Code judges.** Every check is a pure function of what the browser captured, and severities and
   scores come from fixed rules. The same site always gets the same grade, and the checks are unit
   tested without an API key.
@@ -47,6 +54,18 @@ Site Doctor splits the job between Claude and plain code:
 
 Limits (page budget, step cap, timeouts, staying on one site) are enforced in code, not left to
 the prompt. If the API fails or you press Ctrl+C, you still get a partial report.
+
+### Modes
+
+| | `--mode full` (default) | `--mode smart` |
+|---|---|---|
+| Who picks pages | the crawler: sitemaps + every same-site link | Claude, one page at a time |
+| `--max-pages` default | 200 (max 1000) | 15 (max 100) |
+| Links checked | every unique link on every page | the links Claude chooses |
+| Claude's role | analyst: reviews an overview, inspects and screenshots pages, explains | navigator, then explains |
+| Claude cost | about flat, whatever the site size | grows with pages |
+
+Use `smart` for a quick sample of a very large site; `full` for everything else.
 
 ## Quickstart
 
@@ -73,7 +92,10 @@ Reports land in `reports/<host>-<time>/` as `report.html`, `findings.json` and `
 
 | Option | Default | |
 |---|---|---|
-| `--max-pages` | `15` | Most pages to open (link checks don't count) |
+| `--mode` | `full` | `full` crawls every page; `smart` lets Claude pick a sample (see [Modes](#modes)) |
+| `--max-pages` | `200` (`smart`: `15`) | Most pages to open (link checks don't count) |
+| `--concurrency` | `4` | Pages loaded at the same time (1–16) |
+| `--ignore-robots` | off | Also crawl pages robots.txt disallows |
 | `--effort` | `medium` | How hard Claude thinks: `low`, `medium`, `high`, `xhigh`, `max` |
 | `--model` | `claude-opus-5-5` | Any Claude model, e.g. `claude-sonnet-5-5` for cheaper runs |
 | `--no-mobile` | off | Skip the phone-size pass and phone screenshots |
@@ -104,16 +126,24 @@ The overall score is the average of the seven categories. Grades: **A** ≥ 90, 
 
 ## Cost
 
-Each scan makes one Claude request per crawl step plus one for the explanations. The report's
-"Run details" section shows the exact tokens used and an estimated cost. For cheaper runs, use
-`--model claude-sonnet-5-5`, `--effort low` or a smaller `--max-pages`.
+Measured on the bundled demo shop with Claude Opus 5.5:
+
+| Run | Pages | Time | Cost |
+|---|---|---|---|
+| `site-doctor demo` (full) | 10 pages, every link checked | 67 s | $0.16 |
+| `site-doctor demo --mode smart` | 6 pages | 55 s | $0.14 |
+
+In full mode Claude sees a capped overview, so its cost grows little with site size; crawl time
+grows with pages (about 4 pages at a time). Prompt caching is on, so repeated context is billed
+at the cache rate. The report's "Run details" section shows the exact tokens and estimated cost
+of every scan. For cheaper runs, use `--model claude-sonnet-5-5` or `--effort low`.
 
 ## Development
 
 ```bash
 pip install -e ".[dev]"
 playwright install chromium
-pytest          # ~100 tests, no API key or internet needed
+pytest          # ~150 tests, no API key or internet needed
 ruff check src tests
 ```
 
@@ -123,8 +153,13 @@ covers page budgets, redirects, failed pages, API errors and Ctrl+C.
 
 ```
 src/site_doctor/
-├── agent.py         Claude tool-use loop + the explanation call
-├── browser.py       Playwright capture: page, network, timings, axe, phone view
+├── runner.py        picks the mode
+├── crawler.py       full mode: robots.txt, sitemaps, every link
+├── analyst.py       full mode: Claude reviews the crawl
+├── agent.py         smart mode: Claude navigates
+├── session.py       shared Claude tool loop, caching, explanation call
+├── urls.py          URL normalization (tracking params, fragments)
+├── browser.py       async Playwright engine: page, network, timings, axe, phone view
 ├── checks/          one module per category, each a pure function
 ├── triage.py        merges duplicate findings
 ├── scoring.py       rule-based scores and grade
