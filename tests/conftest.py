@@ -43,3 +43,12 @@ def sample_result():
                       findings=findings, groups=groups, scores=scores, overall=overall,
                       grade=grade, summary="Mostly healthy; fix the JS error first.",
                       usage=Usage(120_000, 9_000))
+
+
+@pytest.fixture(scope="session")
+def crawl_url():
+    from tests.crawl_site import crawl_routes
+    from tests.servers import serve_routes
+
+    with serve_routes(crawl_routes()) as url:
+        yield url

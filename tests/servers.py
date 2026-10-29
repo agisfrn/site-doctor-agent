@@ -8,7 +8,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 @contextmanager
 def serve_routes(routes: dict):
-    """routes: path -> dict(status=200, headers={}, body=b"" | str, delay=0)."""
+    """routes: path -> dict(status=200, headers={}, body=bytes | str | f(base_url), delay=0)."""
+    base = {}
 
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
@@ -18,6 +19,8 @@ def serve_routes(routes: dict):
                 return
             time.sleep(route.get("delay", 0))
             body = route.get("body", b"")
+            if callable(body):
+                body = body(base["url"])
             body = body.encode() if isinstance(body, str) else body
             self.send_response(route.get("status", 200))
             for k, v in route.get("headers", {"Content-Type": "text/html"}).items():
@@ -34,9 +37,10 @@ def serve_routes(routes: dict):
 
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     server.daemon_threads = True
+    base["url"] = f"http://127.0.0.1:{server.server_address[1]}"
     threading.Thread(target=server.serve_forever, daemon=True).start()
     try:
-        yield f"http://127.0.0.1:{server.server_address[1]}"
+        yield base["url"]
     finally:
         server.shutdown()
         server.server_close()
