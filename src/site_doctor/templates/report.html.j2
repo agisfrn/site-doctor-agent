@@ -1,0 +1,275 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Site Doctor · {{ host }}</title>
+<style>
+:root {
+  --bg: #f5f6f8; --surface: #ffffff; --surface-2: #f0f2f5; --ink: #14181f; --muted: #5d6675;
+  --line: #e2e5ea; --accent: #0f766e;
+  --critical: #c62828; --high: #e8590c; --medium: #b7791f; --low: #2f6fdb;
+  --good: #15803d; --fair: #b7791f; --poor: #c62828;
+  --shadow: 0 1px 2px rgba(16, 24, 40, .06), 0 1px 3px rgba(16, 24, 40, .08);
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0e1116; --surface: #161b22; --surface-2: #1d232c; --ink: #e6e9ee; --muted: #9aa4b2;
+    --line: #2a313b; --accent: #2dd4bf;
+    --critical: #f2555a; --high: #ff8a3d; --medium: #e3b341; --low: #6ea8fe;
+    --good: #3fb950; --fair: #e3b341; --poor: #f2555a;
+    --shadow: none; color-scheme: dark;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink);
+       font: 15px/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+.wrap { max-width: 1040px; margin: 0 auto; padding: 32px 16px 64px; }
+a { color: var(--accent); }
+h1, h2, h3 { line-height: 1.25; margin: 0; }
+h2 { font-size: 18px; margin: 40px 0 14px; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 14px;
+        box-shadow: var(--shadow); }
+.muted { color: var(--muted); }
+.mono { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 13px; }
+
+/* header */
+.hero { display: grid; grid-template-columns: auto 1fr; gap: 28px; align-items: center; padding: 28px; }
+.brand { font-size: 13px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.hero h1 { font-size: 28px; margin: 4px 0 6px; word-break: break-all; }
+.meta { display: flex; flex-wrap: wrap; gap: 6px 18px; color: var(--muted); font-size: 14px; }
+.ring { position: relative; width: 132px; height: 132px; }
+.ring svg { transform: rotate(-90deg); }
+.ring .track { stroke: var(--surface-2); }
+.ring .value { stroke-linecap: round; }
+.ring .grade { position: absolute; inset: 0; display: grid; place-items: center; text-align: center; }
+.ring .grade b { display: block; font-size: 44px; line-height: 1; }
+.ring .grade span { font-size: 13px; color: var(--muted); }
+.good { --tone: var(--good); } .fair { --tone: var(--fair); } .poor { --tone: var(--poor); }
+.tone { color: var(--tone); }
+.sevbar { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.pill { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px;
+        background: var(--surface-2); font-size: 13px; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--sev); }
+.sev-critical { --sev: var(--critical); } .sev-high { --sev: var(--high); }
+.sev-medium { --sev: var(--medium); } .sev-low { --sev: var(--low); }
+
+.partial { margin-top: 16px; padding: 12px 16px; border-radius: 10px; border: 1px solid var(--medium);
+           background: color-mix(in srgb, var(--medium) 12%, transparent); }
+
+/* category scores */
+.scores { display: grid; grid-template-columns: repeat(auto-fit, minmax(128px, 1fr)); gap: 12px; }
+.score { padding: 14px 16px; }
+.score .label { font-size: 13px; color: var(--muted); }
+.score .num { font-size: 26px; font-weight: 700; }
+.bar { height: 6px; border-radius: 3px; background: var(--surface-2); overflow: hidden; margin-top: 6px; }
+.bar i { display: block; height: 100%; background: var(--tone); border-radius: 3px; }
+
+.summary { padding: 20px 24px; font-size: 16px; }
+.summary .label { font-size: 12px; letter-spacing: .08em; text-transform: uppercase;
+                  color: var(--accent); font-weight: 600; margin-bottom: 6px; }
+
+/* filters */
+.filters { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+.chip { border: 1px solid var(--line); background: var(--surface); color: var(--ink); border-radius: 999px;
+        padding: 6px 12px; font: inherit; font-size: 13px; cursor: pointer; }
+.chip[aria-pressed="true"] { background: var(--ink); color: var(--surface); border-color: var(--ink); }
+.chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.sep { width: 1px; background: var(--line); margin: 0 4px; }
+
+/* issues */
+.issue { margin-bottom: 10px; border-left: 4px solid var(--sev); overflow: hidden; }
+.issue summary { list-style: none; cursor: pointer; padding: 14px 18px; display: grid;
+                 grid-template-columns: auto 1fr auto; gap: 12px; align-items: center; }
+.issue summary::-webkit-details-marker { display: none; }
+.issue summary:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.badge { font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+         color: var(--sev); }
+.issue h3 { font-size: 15px; font-weight: 600; }
+.issue .where { font-size: 13px; color: var(--muted); white-space: nowrap; }
+.issue .body { padding: 0 18px 18px; display: grid; gap: 14px; }
+.fix { padding: 12px 14px; border-radius: 10px; background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.fix b { color: var(--accent); }
+.list { margin: 0; padding-left: 18px; }
+.list li { word-break: break-all; }
+.shots { display: flex; flex-wrap: wrap; gap: 10px; }
+.shots a { display: block; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.shots img { display: block; max-height: 220px; max-width: 100%; object-fit: cover; object-position: top; }
+.empty { padding: 32px; text-align: center; color: var(--muted); }
+
+/* pages table */
+.table-wrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+th, td { text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--line); }
+th { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 600; }
+tr:last-child td { border-bottom: 0; }
+td.url { word-break: break-all; }
+.num-col { text-align: right; white-space: nowrap; }
+
+.details { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; padding: 18px 20px; }
+.details div span { display: block; font-size: 12px; color: var(--muted); }
+footer { margin-top: 32px; text-align: center; color: var(--muted); font-size: 13px; }
+
+@media (max-width: 640px) {
+  .hero { grid-template-columns: 1fr; justify-items: center; text-align: center; }
+  .meta, .sevbar { justify-content: center; }
+  .issue summary { grid-template-columns: 1fr; gap: 4px; }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<section class="card hero">
+  {% set dash = 2 * 3.14159 * 56 %}
+  <div class="ring {{ overall_tone }}" aria-label="Overall grade {{ r.grade }}, {{ r.overall }} out of 100">
+    <svg width="132" height="132" viewBox="0 0 132 132" aria-hidden="true">
+      <circle class="track" cx="66" cy="66" r="56" fill="none" stroke-width="12"/>
+      <circle class="value" cx="66" cy="66" r="56" fill="none" stroke-width="12" stroke="var(--tone)"
+              stroke-dasharray="{{ '%.1f' % (dash * r.overall / 100) }} {{ '%.1f' % dash }}"/>
+    </svg>
+    <div class="grade"><div><b class="tone">{{ r.grade }}</b><span>{{ r.overall }} / 100</span></div></div>
+  </div>
+  <div>
+    <div class="brand">🩺 Site Doctor report</div>
+    <h1>{{ host }}</h1>
+    <div class="meta">
+      <span>{{ r.started_at.replace("T", " ") }}</span>
+      <span>{{ r.pages | length }} pages examined</span>
+      <span>{{ r.groups | length }} issues</span>
+      <span>{{ "%.0f" % r.duration_s }}s</span>
+    </div>
+    <div class="sevbar">
+      {% for s in severities %}
+      <span class="pill sev-{{ s }}"><span class="dot"></span>{{ severity_counts[s] }} {{ s }}</span>
+      {% endfor %}
+    </div>
+    {% if r.partial %}
+    <div class="partial"><b>Partial report.</b> The scan stopped early ({{ r.partial_reason }}).
+      Everything found up to that point is below.</div>
+    {% endif %}
+  </div>
+</section>
+
+<h2>Scores</h2>
+<div class="scores">
+  {% for key, label, value, tone in categories %}
+  <div class="card score {{ tone }}">
+    <div class="label">{{ label }}</div>
+    <div class="num tone">{{ value }}</div>
+    <div class="bar"><i style="width: {{ value }}%"></i></div>
+  </div>
+  {% endfor %}
+</div>
+
+{% if r.summary %}
+<h2>Diagnosis</h2>
+<div class="card summary">
+  <div class="label">Summary</div>
+  {{ r.summary }}
+</div>
+{% endif %}
+
+<h2>Issues</h2>
+{% if r.groups %}
+<div class="filters" role="toolbar" aria-label="Filter issues">
+  <button class="chip" data-filter="sev" data-value="all" aria-pressed="true">All severities</button>
+  {% for s in severities if severity_counts[s] %}
+  <button class="chip" data-filter="sev" data-value="{{ s }}" aria-pressed="false">{{ s | capitalize }} ({{ severity_counts[s] }})</button>
+  {% endfor %}
+  <span class="sep"></span>
+  <button class="chip" data-filter="cat" data-value="all" aria-pressed="true">All categories</button>
+  {% for key, label, value, tone in categories if r.groups | selectattr("category", "equalto", key) | list %}
+  <button class="chip" data-filter="cat" data-value="{{ key }}" aria-pressed="false">{{ label }}</button>
+  {% endfor %}
+</div>
+<div id="issues">
+  {% for g in r.groups %}
+  <details class="card issue sev-{{ g.severity }}" data-sev="{{ g.severity }}" data-cat="{{ g.category }}" id="{{ g.id }}"{% if loop.index <= 3 %} open{% endif %}>
+    <summary>
+      <span class="badge">{{ g.severity }}</span>
+      <h3>{{ g.title }}</h3>
+      <span class="where">{{ labels[g.category] }} · {{ g.urls | length }} page{{ "s" if g.urls | length != 1 }}</span>
+    </summary>
+    <div class="body">
+      {% if g.explanation %}<p style="margin:0">{{ g.explanation }}</p>{% endif %}
+      {% if g.fix %}<div class="fix"><b>How to fix:</b> {{ g.fix }}</div>{% endif %}
+      <div>
+        <div class="muted" style="font-size:13px">Affected pages</div>
+        <ul class="list">{% for u in g.urls[:10] %}<li><a href="{{ u }}">{{ u }}</a></li>{% endfor %}
+          {% if g.urls | length > 10 %}<li class="muted">and {{ g.urls | length - 10 }} more</li>{% endif %}</ul>
+      </div>
+      {% if g.evidence %}
+      <div>
+        <div class="muted" style="font-size:13px">Evidence</div>
+        <ul class="list mono">{% for e in g.evidence %}<li>{{ e }}</li>{% endfor %}</ul>
+      </div>
+      {% endif %}
+      {% if g.screenshots %}
+      <div class="shots">
+        {% for s in g.screenshots %}<a href="{{ s }}"><img src="{{ s }}" alt="Screenshot: {{ s }}"></a>{% endfor %}
+      </div>
+      {% endif %}
+      <div class="muted mono">{{ g.id }}</div>
+    </div>
+  </details>
+  {% endfor %}
+</div>
+<div class="card empty" id="no-match" hidden>No issues match these filters.</div>
+{% else %}
+<div class="card empty">No issues found. 🎉</div>
+{% endif %}
+
+<h2>Pages examined</h2>
+<div class="card table-wrap">
+  <table>
+    <thead><tr><th>Page</th><th class="num-col">Status</th><th class="num-col">Load</th><th class="num-col">LCP</th><th class="num-col">Issues</th></tr></thead>
+    <tbody>
+      {% for p in r.pages %}
+      <tr>
+        <td class="url"><a href="{{ p.url }}">{{ p.url }}</a>{% if p.title %}<div class="muted" style="font-size:13px">{{ p.title }}</div>{% endif %}{% if p.error %}<div class="tone poor" style="font-size:13px">{{ p.error }}</div>{% endif %}</td>
+        <td class="num-col">{{ p.status if p.status is not none else "—" }}</td>
+        <td class="num-col">{{ "%.2f" % p.load_time_s }}s</td>
+        <td class="num-col">{% if p.lcp_ms is none %}—{% elif p.lcp_ms < 1000 %}{{ "%.0f" % p.lcp_ms }} ms{% else %}{{ "%.1f" % (p.lcp_ms / 1000) }}s{% endif %}</td>
+        <td class="num-col">{{ p.findings | length }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<h2>Run details</h2>
+<div class="card details">
+  <div><span>Model</span>{{ r.model }}</div>
+  <div><span>Tokens in / out</span>{{ "{:,}".format(r.usage.input_tokens) }} / {{ "{:,}".format(r.usage.output_tokens) }}</div>
+  <div><span>Estimated cost</span>{{ cost }}</div>
+  <div><span>Duration</span>{{ "%.0f" % r.duration_s }}s</div>
+</div>
+
+<footer>Generated by Site Doctor · scores are rule-based, explanations written by Claude</footer>
+</div>
+
+<script>
+(() => {
+  const state = { sev: "all", cat: "all" };
+  const issues = document.querySelectorAll("#issues .issue");
+  const empty = document.getElementById("no-match");
+  document.querySelectorAll(".chip").forEach(chip => chip.addEventListener("click", () => {
+    const kind = chip.dataset.filter;
+    state[kind] = chip.dataset.value;
+    document.querySelectorAll(`.chip[data-filter="${kind}"]`)
+      .forEach(c => c.setAttribute("aria-pressed", String(c === chip)));
+    let shown = 0;
+    issues.forEach(el => {
+      const ok = (state.sev === "all" || el.dataset.sev === state.sev) &&
+                 (state.cat === "all" || el.dataset.cat === state.cat);
+      el.hidden = !ok;
+      shown += ok;
+    });
+    if (empty) empty.hidden = shown > 0;
+  }));
+})();
+</script>
+</body>
+</html>
