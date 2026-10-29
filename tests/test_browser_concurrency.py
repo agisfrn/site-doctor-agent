@@ -35,11 +35,12 @@ def timed_capture_many(urls):
 
 
 def test_capture_many_is_concurrent():
-    # 4 pages that each take 1s to answer: with concurrency 4 that's well under 4s
-    routes = {f"/p{i}": {"body": "<title>p</title>", "delay": 1} for i in range(4)}
+    # 4 pages that each take 2s to answer: one at a time is 8s+ (plus ~1s of checks per page);
+    # with concurrency 4 it's ~3.5s. The margin keeps this stable on a busy machine.
+    routes = {f"/p{i}": {"body": "<title>p</title>", "delay": 2} for i in range(4)}
     with serve_routes(routes) as url, ThreadPoolExecutor(1) as pool:
         elapsed = pool.submit(timed_capture_many, [f"{url}/p{i}" for i in range(4)]).result()
-    assert elapsed < 3
+    assert elapsed < 6
 
 
 def test_fetch_many_and_fetch_text(browser, demo_url):
