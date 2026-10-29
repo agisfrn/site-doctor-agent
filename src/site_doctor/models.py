@@ -122,6 +122,9 @@ class ScanResult:
     usage: Usage
     partial: bool = False
     partial_reason: str = ""
+    mode: str = "full"
+    links_checked: int = 0
+    page_groups: list[dict] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return asdict(self)

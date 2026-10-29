@@ -12,12 +12,12 @@ from urllib.robotparser import RobotFileParser
 import defusedxml.ElementTree as ET
 from defusedxml import DefusedXmlException
 
-from .agent import normalize_url, origin_of
 from .browser import NotAPage, PageLoadError
 from .checks import basics, links, run_page_checks, seo
 from .config import ScanConfig
 from .events import CrawlProgress, Event
 from .models import Finding, PageCapture, PageResult
+from .urls import normalize_url, origin_of
 
 SKIP_EXTENSIONS = (".pdf", ".zip", ".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg", ".mp4",
                    ".mp3", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".csv", ".xml",
