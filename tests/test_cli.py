@@ -71,3 +71,18 @@ def test_missing_credentials_file_explains(monkeypatch, tmp_path):
     monkeypatch.setattr(cli.anthropic, "Anthropic", lambda: FakeClient([error]))
     res = runner.invoke(app, ["scan", "example.com", "--out", str(tmp_path), "--plain"])
     assert res.exit_code == 1 and "ANTHROPIC_API_KEY" in res.output
+
+
+def test_scan_that_fails_before_any_page_exits_1(monkeypatch, tmp_path):
+    import httpx2
+
+    from tests.fakes import FakeClient
+
+    request = httpx2.Request("POST", "https://api.anthropic.com/v1/messages")
+    error = cli.anthropic.NotFoundError(
+        "model: claude-typo", response=httpx2.Response(404, request=request), body=None)
+    monkeypatch.setattr(cli, "Browser", FakeBrowserCM)
+    monkeypatch.setattr(cli.anthropic, "Anthropic", lambda: FakeClient([error]))
+    res = runner.invoke(app, ["scan", "example.com", "--out", str(tmp_path), "--plain"])
+    assert res.exit_code == 1
+    assert "claude-typo" in res.output and "Grade" not in res.output

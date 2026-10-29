@@ -41,3 +41,17 @@ def test_estimate_cost():
 def test_fast_lcp_is_shown_in_milliseconds(sample_result):
     html = render_html(sample_result)
     assert "980 ms" in html and "0.0s" not in html
+
+
+def test_estimate_cost_prices_cache_tokens():
+    usage = Usage(input_tokens=0, output_tokens=0, cache_read_input_tokens=1_000_000,
+                  cache_creation_input_tokens=1_000_000)
+    assert estimate_cost("claude-opus-5-5", usage) == pytest.approx(0.20 + 5.00)
+
+
+def test_old_findings_json_without_cache_fields_still_loads(sample_result):
+    from site_doctor.models import ScanResult
+
+    data = sample_result.to_dict()
+    data["usage"] = {"input_tokens": 5, "output_tokens": 6}
+    assert ScanResult.from_dict(data).usage.cache_read_input_tokens == 0

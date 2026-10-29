@@ -242,7 +242,8 @@ footer { margin-top: 32px; text-align: center; color: var(--muted); font-size: 1
 <h2>Run details</h2>
 <div class="card details">
   <div><span>Model</span>{{ r.model }}</div>
-  <div><span>Tokens in / out</span>{{ "{:,}".format(r.usage.input_tokens) }} / {{ "{:,}".format(r.usage.output_tokens) }}</div>
+  <div><span>Tokens in / out</span>{{ "{:,}".format(r.usage.input_tokens + r.usage.cache_read_input_tokens + r.usage.cache_creation_input_tokens) }} / {{ "{:,}".format(r.usage.output_tokens) }}</div>
+  <div><span>Served from cache</span>{{ "{:,}".format(r.usage.cache_read_input_tokens) }} tokens</div>
   <div><span>Estimated cost</span>{{ cost }}</div>
   <div><span>Duration</span>{{ "%.0f" % r.duration_s }}s</div>
 </div>

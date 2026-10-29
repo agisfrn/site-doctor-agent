@@ -71,6 +71,10 @@ def run_scan(config: ScanConfig, plain: bool, open_report: bool = False) -> Path
             _fail(NO_CHROMIUM)
         raise
 
+    if result.partial and not result.pages:
+        # Nothing was examined (bad --model, network down...): a grade would be a lie.
+        _fail(f"The scan stopped before any page was examined: {result.partial_reason}")
+
     path = write_report(result, config.run_dir)
     console = Console()
     if result.partial:

@@ -280,3 +280,33 @@ def test_no_findings_means_no_triage_call(tmp_path):
     script = [response(tool_use("finish", summary="nothing to see"))]
     agent, client, *_ = make_agent(script, {}, tmp_path)
     assert agent.run().summary == "nothing to see" and len(client.calls) == 1
+
+
+def test_non_html_target_is_not_a_page_finding_or_budget(tmp_path):
+    from site_doctor.browser import NotAPage
+
+    script = [response(tool_use("open_page", url="https://a.com/")),
+              response(tool_use("open_page", url="https://a.com/brochure.pdf")),
+              response(tool_use("open_page", url="https://a.com/about")),
+              response(tool_use("finish", summary="s"))]
+    pages = {"https://a.com/": page("https://a.com/"),
+             "https://a.com/brochure.pdf": NotAPage("not an HTML page (application/pdf)", 200),
+             "https://a.com/about": page("https://a.com/about")}
+    agent, *_ = make_agent(script, pages, tmp_path, max_pages=2)
+    result = agent.run()
+    pdf = tool_results(agent)[1]
+    assert pdf["is_error"] and "check_link" in pdf["data"]["error"]
+    assert not any(f.id == "basics.page-load-failed" for f in result.findings)
+    assert len(result.pages) == 2  # the PDF didn't use up the 2-page budget
+
+
+def test_crawl_requests_use_prompt_caching_and_count_cache_tokens(tmp_path):
+    from types import SimpleNamespace
+
+    cached = response(stop="end_turn")
+    cached.usage = SimpleNamespace(input_tokens=50, output_tokens=10,
+                                   cache_read_input_tokens=4000, cache_creation_input_tokens=300)
+    agent, client, *_ = make_agent([cached], {}, tmp_path)
+    usage = agent.run().usage
+    assert client.calls[0]["cache_control"] == {"type": "ephemeral"}
+    assert (usage.cache_read_input_tokens, usage.cache_creation_input_tokens) == (4000, 300)

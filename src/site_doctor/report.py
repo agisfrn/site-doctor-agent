@@ -11,12 +11,12 @@ from jinja2 import Environment, PackageLoader
 
 from .models import CATEGORIES, SEVERITIES, ScanResult, Usage
 
-# USD per million input / output tokens.
+# USD per million tokens: input, output, cache write (5-minute), cache read.
 PRICES = {
-    "claude-opus-5-5": (4.0, 20.0),
-    "claude-sonnet-5-5": (2.0, 10.0),
-    "claude-haiku-5-5": (0.10, 0.50),
-    "claude-fable-5-1": (10.0, 50.0),
+    "claude-opus-5-5": (4.0, 20.0, 5.0, 0.20),
+    "claude-sonnet-5-5": (2.0, 10.0, 2.50, 0.20),
+    "claude-haiku-5-5": (0.10, 0.50, 0.125, 0.01),
+    "claude-fable-5-1": (10.0, 50.0, 12.50, 0.25),
 }
 
 CATEGORY_LABELS = {
@@ -31,8 +31,10 @@ _env = Environment(loader=PackageLoader("site_doctor", "templates"), autoescape=
 def estimate_cost(model: str, usage: Usage) -> float | None:
     if model not in PRICES:
         return None
-    per_in, per_out = PRICES[model]
-    return (usage.input_tokens * per_in + usage.output_tokens * per_out) / 1_000_000
+    per_in, per_out, per_write, per_read = PRICES[model]
+    return (usage.input_tokens * per_in + usage.output_tokens * per_out
+            + usage.cache_creation_input_tokens * per_write
+            + usage.cache_read_input_tokens * per_read) / 1_000_000
 
 
 def _score_tone(value: int) -> str:

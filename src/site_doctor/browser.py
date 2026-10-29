@@ -94,6 +94,14 @@ class PageLoadError(Exception):
     """The page could not be loaded at all."""
 
 
+class NotAPage(PageLoadError):
+    """The URL answered, but with something that isn't an HTML page (image, PDF, feed...)."""
+
+    def __init__(self, message: str, status: int | None = None):
+        super().__init__(message)
+        self.status = status
+
+
 def _first_line(e: BaseException) -> str:
     text = str(e).strip()
     return text.splitlines()[0] if text else type(e).__name__
@@ -106,9 +114,15 @@ AXE_JS = """async () => {
 }"""
 
 
+HTML_TYPES = {"text/html", "application/xhtml+xml"}
+MAX_SIZED_REQUESTS = 300
+
+
 def run_axe(page: Page) -> list[dict]:
+    # Evaluated through the DevTools protocol, not a <script> tag, so the page's own
+    # Content-Security-Policy can't block it.
     try:
-        page.add_script_tag(path=str(AXE_PATH))
+        page.evaluate(AXE_PATH.read_text(encoding="utf-8"))
         return page.evaluate(AXE_JS)
     except PlaywrightError:
         return []
@@ -128,6 +142,8 @@ class Browser:
         self._console: list[str] = []
         self._errors: list[str] = []
         self._requests: list[str] = []
+        self._finished: list = []
+        self._page.on("requestfinished", lambda r: self._finished.append(r))
         self._page.on("console", lambda m: m.type == "error" and self._console.append(m.text))
         self._page.on("pageerror", lambda e: self._errors.append(_first_line(e)))
         self._page.on("request", lambda r: self._requests.append(r.url))
@@ -145,18 +161,28 @@ class Browser:
         self._console.clear()
         self._errors.clear()
         self._requests.clear()
+        self._finished.clear()
         start = time.perf_counter()
         try:
-            response = self._page.goto(url, wait_until="load")
+            # Only the document has to arrive; a stalled image or widget mustn't fail the page.
+            response = self._page.goto(url, wait_until="domcontentloaded")
         except PlaywrightError as e:
+            if "Download is starting" in str(e):
+                raise NotAPage("a file download, not a page") from e
             raise PageLoadError(_first_line(e)) from e
+        if response:
+            ctype = response.headers.get("content-type", "").split(";")[0].strip().lower()
+            if ctype and ctype not in HTML_TYPES:
+                raise NotAPage(f"not an HTML page ({ctype})", response.status)
+        for state, timeout in (("load", self.timeout_ms), ("networkidle", 5000)):
+            try:
+                self._page.wait_for_load_state(state, timeout=timeout)
+            except PlaywrightError:
+                pass
         load_time = round(time.perf_counter() - start, 2)
-        try:
-            self._page.wait_for_load_state("networkidle", timeout=5000)
-        except PlaywrightError:
-            pass
 
         data = self._page.evaluate(PAGE_DATA_JS)
+        self._fill_sizes(data["resources"])
         return PageCapture(
             url=url,
             final_url=self._page.url,
@@ -176,11 +202,29 @@ class Browser:
             load_time_s=load_time,
         )
 
+    def _fill_sizes(self, resources: list[dict]) -> None:
+        """Resource Timing reports 0 bytes for cross-origin (CDN) assets; ask the network."""
+        missing = {r["url"] for r in resources if not r["transfer_size"]}
+        for request in self._finished[:MAX_SIZED_REQUESTS]:
+            if request.url not in missing:
+                continue
+            try:
+                size = request.sizes().get("responseBodySize", 0)
+            except PlaywrightError:
+                continue
+            for r in resources:
+                if r["url"] == request.url and not r["transfer_size"]:
+                    r["transfer_size"] = max(size, 0)
+
     def _capture_mobile(self, url: str) -> MobileData | None:
         if not self._mobile_page:
             return None
         try:
-            self._mobile_page.goto(url, wait_until="load")
+            self._mobile_page.goto(url, wait_until="domcontentloaded")
+            try:
+                self._mobile_page.wait_for_load_state("load", timeout=self.timeout_ms)
+            except PlaywrightError:
+                pass
             return MobileData(**self._mobile_page.evaluate(MOBILE_JS))
         except PlaywrightError:
             return None

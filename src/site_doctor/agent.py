@@ -12,7 +12,7 @@ from urllib.parse import urlsplit, urlunsplit
 
 import anthropic
 
-from .browser import PageLoadError
+from .browser import NotAPage, PageLoadError
 from .checks import basics, links, run_page_checks, seo
 from .config import ScanConfig
 from .events import (
@@ -154,17 +154,22 @@ class Agent:
     def _create(self, **kw):
         response = self.client.beta.messages.create(
             model=self.config.model, max_tokens=16000, betas=BETAS, fallbacks="default", **kw)
-        self.usage.input_tokens += response.usage.input_tokens
-        self.usage.output_tokens += response.usage.output_tokens
+        u = response.usage
+        self.usage.input_tokens += u.input_tokens
+        self.usage.output_tokens += u.output_tokens
+        self.usage.cache_read_input_tokens += getattr(u, "cache_read_input_tokens", 0) or 0
+        self.usage.cache_creation_input_tokens += getattr(u, "cache_creation_input_tokens", 0) or 0
         return response
 
     def _crawl(self) -> None:
         self.messages.append({"role": "user",
                               "content": f"Examine this website: {self.config.url}"})
         while not self.finished and self.steps < self.config.max_steps:
+            # Each step resends the whole conversation; caching makes the repeated prefix cheap.
             response = self._create(system=system_prompt(self.config), tools=TOOLS,
                                     messages=self.messages,
-                                    output_config={"effort": self.config.effort})
+                                    output_config={"effort": self.config.effort},
+                                    cache_control={"type": "ephemeral"})
             self.messages.append({"role": "assistant", "content": response.content})
             for block in response.content:
                 if block.type == "text" and block.text.strip():
@@ -213,6 +218,8 @@ class Agent:
                              "Call finish with your summary."}, ""
         try:
             cap = self.browser.capture(url)
+        except NotAPage as e:
+            return {"error": f"{e}: it's a file, not a page. Use check_link for files."}, ""
         except PageLoadError as e:
             is_start = key == normalize_url(self.config.url)
             failure = basics.load_failure(key, str(e), is_start)
