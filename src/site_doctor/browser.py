@@ -174,12 +174,14 @@ class Browser:
             ctype = response.headers.get("content-type", "").split(";")[0].strip().lower()
             if ctype and ctype not in HTML_TYPES:
                 raise NotAPage(f"not an HTML page ({ctype})", response.status)
+        load_time = None
         for state, timeout in (("load", self.timeout_ms), ("networkidle", 5000)):
             try:
                 self._page.wait_for_load_state(state, timeout=timeout)
             except PlaywrightError:
                 pass
-        load_time = round(time.perf_counter() - start, 2)
+            if load_time is None:  # the clock stops at the load event, not after network idle
+                load_time = round(time.perf_counter() - start, 2)
 
         data = self._page.evaluate(PAGE_DATA_JS)
         self._fill_sizes(data["resources"])

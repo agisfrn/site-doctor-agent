@@ -86,3 +86,16 @@ def test_scan_that_fails_before_any_page_exits_1(monkeypatch, tmp_path):
     res = runner.invoke(app, ["scan", "example.com", "--out", str(tmp_path), "--plain"])
     assert res.exit_code == 1
     assert "claude-typo" in res.output and "Grade" not in res.output
+
+
+def test_only_the_key_precedence_notice_is_silenced(caplog):
+    import logging
+
+    cli._quiet_sdk_notices()
+    log = logging.getLogger("anthropic.lib.credentials._auth")  # where the SDK logs it
+    with caplog.at_level(logging.WARNING, logger="anthropic"):
+        log.warning("%s is set and takes precedence over the SDK's profile / federation "
+                    "auto-discovery; unset %s to use the auto-discovered credential.",
+                    "ANTHROPIC_API_KEY", "ANTHROPIC_API_KEY")
+        log.warning("Retrying request after rate limit")
+    assert [r.getMessage() for r in caplog.records] == ["Retrying request after rate limit"]

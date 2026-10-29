@@ -27,3 +27,8 @@ def test_fetch_status(browser, demo_url):
 def test_screenshot_writes_png(browser, demo_url, tmp_path):
     p = browser.screenshot(demo_url + "/clean.html", tmp_path / "s.png", mobile=True)
     assert p.read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"
+
+
+def test_load_time_excludes_the_network_idle_wait(browser, demo_url):
+    # networkidle needs 500ms of silence; that's not part of how long the page took to load
+    assert browser.capture(demo_url + "/clean.html").load_time_s < 0.45

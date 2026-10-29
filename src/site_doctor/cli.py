@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import sys
 import webbrowser
 from enum import StrEnum
@@ -45,8 +46,19 @@ def _utf8_output() -> None:
             stream.reconfigure(encoding="utf-8", errors="replace")
 
 
+class _DropKeyPrecedenceNotice(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        return "takes precedence over the SDK's profile" not in record.getMessage()
+
+
+def _quiet_sdk_notices() -> None:
+    """The SDK warns when an API key shadows a saved profile; harmless, and noisy in a demo."""
+    logging.getLogger("anthropic.lib.credentials._auth").addFilter(_DropKeyPrecedenceNotice())
+
+
 def main() -> None:
     _utf8_output()
+    _quiet_sdk_notices()
     app()
 
 
