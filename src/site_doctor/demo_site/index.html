@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Fernhollow Plant Co. — Houseplants delivered</title>
+  <link rel="stylesheet" href="/style.css">
+  <!-- Planted: no meta description, no canonical, no Open Graph tags -->
+</head>
+<body>
+  <header>
+    <a class="logo" href="/">Fernhollow</a>
+    <nav>
+      <a href="/about.html">About</a>
+      <a href="/products.html">Plants</a>
+      <a href="/contact.html">Contact</a>
+      <a href="/missing-page">Care guides</a>
+    </nav>
+  </header>
+  <main>
+    <h1>Plants that thrive where you live</h1>
+    <h1>Free delivery this week</h1>
+    <p class="lead">Hand-picked houseplants, potted and delivered within 48 hours.</p>
+    <!-- Planted: low-contrast text -->
+    <p style="color:#d9d9d9">Order before 2pm for next-day dispatch.</p>
+    <div class="grid">
+      <div class="card">
+        <!-- Planted: image without alt text -->
+        <img src="/leaf.svg" width="48" height="48">
+        <h3>Monstera</h3><p>Big leaves, easy care.</p>
+      </div>
+      <div class="card"><h3>Snake plant</h3><p>Survives almost anything.</p></div>
+      <div class="card"><h3>Pothos</h3><p>Trails beautifully from shelves.</p></div>
+    </div>
+    <a class="btn" href="/products.html">Shop all plants</a>
+  </main>
+  <footer>
+    <a href="/clean.html">Shipping</a>
+    <a href="/error">Order status</a>
+    <a href="https://broken.example.invalid/partners">Partners</a>
+  </footer>
+  <script>
+    // Planted: a banner pushed in after load causes a layout shift
+    setTimeout(() => {
+      const b = document.createElement("div");
+      b.textContent = "🌿 Spring sale: 20% off all ferns";
+      b.style.cssText = "height:140px;display:flex;align-items:center;justify-content:center;" +
+                        "background:#2f6f4f;color:#fff;font:20px system-ui";
+      document.body.prepend(b);
+    }, 300);
+    // Planted: an uncaught JavaScript error
+    undefinedFn();
+  </script>
+</body>
+</html>
