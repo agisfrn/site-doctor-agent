@@ -98,3 +98,34 @@ def raising_auth_error_client():
     error = anthropic.AuthenticationError(
         "invalid x-api-key", response=httpx2.Response(401, request=request), body=None)
     return FakeClient([error])
+
+
+class FakeCrawlBrowser(FakeBrowser):
+    """FakeBrowser plus the batch methods the crawler uses.
+
+    pages: url -> PageCapture | Exception; texts: url -> (status, text) for robots/sitemaps;
+    interrupt_on_batch: raise KeyboardInterrupt on that capture_many call (1-based)."""
+
+    def __init__(self, pages=None, statuses=None, texts=None, interrupt_on_batch=None):
+        super().__init__(pages, statuses)
+        self.texts = texts or {}
+        self.interrupt_on_batch = interrupt_on_batch
+        self.batches = 0
+
+    def capture_many(self, urls):
+        self.batches += 1
+        if self.batches == self.interrupt_on_batch:
+            raise KeyboardInterrupt
+        out = {}
+        for url in urls:
+            try:
+                out[url] = self.capture(url)
+            except PageLoadError as e:
+                out[url] = e
+        return out
+
+    def fetch_many(self, urls):
+        return {u: self.fetch_status(u) for u in urls}
+
+    def fetch_text(self, url):
+        return self.texts.get(url, (404, ""))

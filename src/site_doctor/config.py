@@ -27,6 +27,9 @@ class ScanConfig:
     effort: str = "medium"
     mobile: bool = True
     out_dir: Path = Path("reports")
+    mode: str = "full"
+    concurrency: int = 4
+    ignore_robots: bool = False
     stamp: str = field(default_factory=_now_stamp)
 
     @property

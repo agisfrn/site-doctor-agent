@@ -37,6 +37,14 @@ class StepFinished:
 
 
 @dataclass(frozen=True)
+class CrawlProgress:
+    pages_done: int
+    queued: int
+    links_checked: int
+    links_total: int
+
+
+@dataclass(frozen=True)
 class TriageStarted:
     groups: int
 
@@ -47,4 +55,5 @@ class ScanFinished:
     reason: str
 
 
-Event = ScanStarted | AgentNote | StepStarted | StepFinished | TriageStarted | ScanFinished
+Event = (ScanStarted | AgentNote | StepStarted | StepFinished | CrawlProgress | TriageStarted
+         | ScanFinished)
