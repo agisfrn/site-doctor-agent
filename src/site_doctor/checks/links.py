@@ -11,7 +11,10 @@ def link_finding(url: str, status: int | str, internal: bool,
     if found_on:
         evidence += f" · linked from {found_on}"
     if isinstance(status, str):
-        return Finding("links.unreachable", "links", "medium", "Link can't be reached", url, evidence)
-    if internal:
-        return Finding("links.broken-internal", "links", "high", "Broken internal link", url, evidence)
-    return Finding("links.broken-external", "links", "medium", "Broken external link", url, evidence)
+        rule = ("links.unreachable", "medium", "Link can't be reached")
+    elif internal:
+        rule = ("links.broken-internal", "high", "Broken internal link")
+    else:
+        rule = ("links.broken-external", "medium", "Broken external link")
+    fid, severity, title = rule
+    return Finding(fid, "links", severity, title, url, evidence)
