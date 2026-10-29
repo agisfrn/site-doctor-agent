@@ -2,7 +2,7 @@
 
 **An AI agent that scans a whole website like a QA engineer, finds what's broken, and writes a scored report.**
 
-[![CI](https://github.com/panmm942-ui/site-doctor/actions/workflows/ci.yml/badge.svg)](https://github.com/panmm942-ui/site-doctor/actions/workflows/ci.yml)
+[![CI](https://github.com/panmm942-ui/site-doctor-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/panmm942-ui/site-doctor-agent/actions/workflows/ci.yml)
 ![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)
 ![License: MIT](https://img.shields.io/badge/license-MIT-green)
 
@@ -70,7 +70,7 @@ Use `smart` for a quick sample of a very large site; `full` for everything else.
 ## Quickstart
 
 ```bash
-git clone https://github.com/panmm942-ui/site-doctor && cd site-doctor
+git clone https://github.com/panmm942-ui/site-doctor-agent && cd site-doctor-agent
 python -m venv .venv && source .venv/bin/activate      # Windows: .venv\Scripts\activate
 pip install -e .
 playwright install chromium
