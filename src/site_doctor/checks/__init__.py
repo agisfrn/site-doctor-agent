@@ -3,12 +3,14 @@
 from collections.abc import Callable
 
 from ..models import Finding, PageCapture
-from . import basics, security, seo
+from . import basics, mobile, performance, security, seo
 
 PAGE_CHECKS: list[Callable[[PageCapture], list[Finding]]] = [
     basics.check,
     seo.check,
+    performance.check,
     security.check,
+    mobile.check,
 ]
 
 
