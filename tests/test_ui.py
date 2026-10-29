@@ -51,3 +51,23 @@ def test_live_ui_renders_log_and_tally():
 
 def test_make_ui_falls_back_to_plain_when_not_a_terminal():
     assert isinstance(make_ui(plain=True), PlainUI)
+
+
+def test_plain_ui_prints_crawl_progress():
+    from site_doctor.events import CrawlProgress
+
+    out = io.StringIO()
+    PlainUI(out).handle(CrawlProgress(34, 12, 120, 340))
+    assert "[crawl] 34 pages · 12 queued · 120/340 links checked" in out.getvalue()
+
+
+def test_live_ui_shows_crawl_progress():
+    from site_doctor.events import CrawlProgress
+
+    console = Console(file=io.StringIO(), width=120, force_terminal=True, color_system=None)
+    ui = LiveUI(console)
+    ui.handle(ScanStarted("https://a.com/", "claude-opus-5-5", 200))
+    ui.handle(CrawlProgress(34, 12, 120, 340))
+    console.print(ui.render())
+    text = console.file.getvalue()
+    assert "34 pages" in text and "12 queued" in text and "120/340 links" in text

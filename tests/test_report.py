@@ -55,3 +55,22 @@ def test_old_findings_json_without_cache_fields_still_loads(sample_result):
     data = sample_result.to_dict()
     data["usage"] = {"input_tokens": 5, "output_tokens": 6}
     assert ScanResult.from_dict(data).usage.cache_read_input_tokens == 0
+
+
+def test_report_site_map_and_long_page_lists(sample_result):
+    from site_doctor.models import PageResult
+
+    sample_result.mode, sample_result.links_checked = "full", 1340
+    sample_result.page_groups = [{"pattern": "/products/*", "pages": 30, "issues": 12}]
+    sample_result.pages = [PageResult(f"https://a.com/p{i}", 200, "", 0.1, None, [])
+                           for i in range(60)]
+    html = render_html(sample_result)
+    assert "Site map" in html and "/products/*" in html
+    assert "Full scan" in html and "1,340 links checked" in html
+    assert "Show all 60 pages" in html
+
+
+def test_smart_scan_has_no_site_map(sample_result):
+    sample_result.mode = "smart"
+    html = render_html(sample_result)
+    assert "Smart scan" in html and "Site map" not in html

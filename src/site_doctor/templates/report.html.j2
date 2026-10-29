@@ -97,6 +97,8 @@ h2 { font-size: 18px; margin: 40px 0 14px; }
 .shots a { display: block; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
 .shots img { display: block; max-height: 220px; max-width: 100%; object-fit: cover; object-position: top; }
 .empty { padding: 32px; text-align: center; color: var(--muted); }
+.more-pages { margin-top: 10px; }
+.more-pages summary { cursor: pointer; padding: 12px 16px; color: var(--accent); }
 
 /* pages table */
 .table-wrap { overflow-x: auto; }
@@ -135,8 +137,10 @@ footer { margin-top: 32px; text-align: center; color: var(--muted); font-size: 1
     <div class="brand">🩺 Site Doctor report</div>
     <h1>{{ host }}</h1>
     <div class="meta">
+      <span>{{ "Full scan" if r.mode == "full" else "Smart scan" }}</span>
       <span>{{ r.started_at.replace("T", " ") }}</span>
       <span>{{ r.pages | length }} pages examined</span>
+      {% if r.mode == "full" %}<span>{{ "{:,}".format(r.links_checked) }} links checked</span>{% endif %}
       <span>{{ r.groups | length }} issues</span>
       <span>{{ "%.0f" % r.duration_s }}s</span>
     </div>
@@ -221,12 +225,22 @@ footer { margin-top: 32px; text-align: center; color: var(--muted); font-size: 1
 <div class="card empty">No issues found. 🎉</div>
 {% endif %}
 
-<h2>Pages examined</h2>
+{% if r.page_groups %}
+<h2>Site map</h2>
 <div class="card table-wrap">
   <table>
-    <thead><tr><th>Page</th><th class="num-col">Status</th><th class="num-col">Load</th><th class="num-col">LCP</th><th class="num-col">Issues</th></tr></thead>
+    <thead><tr><th>Page group</th><th class="num-col">Pages</th><th class="num-col">Issues</th></tr></thead>
     <tbody>
-      {% for p in r.pages %}
+      {% for g in r.page_groups[:40] %}
+      <tr><td class="mono">{{ g.pattern }}</td><td class="num-col">{{ g.pages }}</td><td class="num-col">{{ g.issues }}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+{% macro page_rows(pages) %}
+      {% for p in pages %}
       <tr>
         <td class="url"><a href="{{ p.url }}">{{ p.url }}</a>{% if p.title %}<div class="muted" style="font-size:13px">{{ p.title }}</div>{% endif %}{% if p.error %}<div class="tone poor" style="font-size:13px">{{ p.error }}</div>{% endif %}</td>
         <td class="num-col">{{ p.status if p.status is not none else "—" }}</td>
@@ -235,9 +249,22 @@ footer { margin-top: 32px; text-align: center; color: var(--muted); font-size: 1
         <td class="num-col">{{ p.findings | length }}</td>
       </tr>
       {% endfor %}
-    </tbody>
+{% endmacro %}
+{% set page_head %}<thead><tr><th>Page</th><th class="num-col">Status</th><th class="num-col">Load</th><th class="num-col">LCP</th><th class="num-col">Issues</th></tr></thead>{% endset %}
+
+<h2>Pages examined</h2>
+<div class="card table-wrap">
+  <table>
+    {{ page_head }}
+    <tbody>{{ page_rows(pages[:50]) }}</tbody>
   </table>
 </div>
+{% if pages | length > 50 %}
+<details class="card more-pages">
+  <summary>Show all {{ pages | length }} pages</summary>
+  <div class="table-wrap"><table>{{ page_head }}<tbody>{{ page_rows(pages[50:]) }}</tbody></table></div>
+</details>
+{% endif %}
 
 <h2>Run details</h2>
 <div class="card details">

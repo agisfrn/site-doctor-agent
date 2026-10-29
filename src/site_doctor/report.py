@@ -54,7 +54,7 @@ def render_html(result: ScanResult) -> str:
         severity_counts={s: severity_counts.get(s, 0) for s in SEVERITIES},
         overall_tone=_score_tone(result.overall),
         cost=f"${cost:.2f}" if cost is not None else "n/a",
-        issues_per_page=Counter(f.url for f in result.findings),
+        pages=sorted(result.pages, key=lambda p: -len(p.findings)),
     )
 
 

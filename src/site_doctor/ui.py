@@ -14,6 +14,7 @@ from rich.text import Text
 
 from .events import (
     AgentNote,
+    CrawlProgress,
     Event,
     ScanFinished,
     ScanStarted,
@@ -48,6 +49,11 @@ class _Formatter:
         return f"     💬 {first[:120]}"
 
     @staticmethod
+    def crawl_line(e: CrawlProgress) -> str:
+        return (f"[crawl] {e.pages_done} pages · {e.queued} queued · "
+                f"{e.links_checked}/{e.links_total} links checked")
+
+    @staticmethod
     def triage_line(e: TriageStarted) -> str:
         return f"🧠 Writing explanations for {e.groups} issues…"
 
@@ -78,6 +84,8 @@ class PlainUI(_Formatter):
             self._print(self.note_line(e))
         elif isinstance(e, StepFinished):
             self._print(self.step_line(e))
+        elif isinstance(e, CrawlProgress):
+            self._print(self.crawl_line(e))
         elif isinstance(e, TriageStarted):
             self._print(self.triage_line(e))
         elif isinstance(e, ScanFinished) and e.partial:
@@ -93,6 +101,7 @@ class LiveUI(_Formatter):
         self.pages = (0, 0)
         self.tally = dict.fromkeys(SEVERITIES, 0)
         self._live: Live | None = None
+        self.crawl: CrawlProgress | None = None
 
     def __enter__(self) -> LiveUI:
         self._live = Live(self.render(), console=self.console, refresh_per_second=8,
@@ -115,6 +124,9 @@ class LiveUI(_Formatter):
             footer.append("● ", style=SEVERITY_STYLE[s])
             footer.append(f"{self.tally[s]} {s}   ")
         parts = [Panel(header, border_style="cyan"), log]
+        if self.crawl:
+            parts.append(Text(f"  ⟳ {self.crawl_line(self.crawl).removeprefix('[crawl] ')}",
+                              style="cyan"))
         if self.current:
             parts.append(Text(f"  ⟳ {self.current}", style="dim italic"))
         parts.append(Panel(footer, border_style="dim"))
@@ -131,6 +143,7 @@ class LiveUI(_Formatter):
         elif isinstance(e, AgentNote):
             self.lines.append(Text(self.note_line(e), style="dim"))
         elif isinstance(e, StepStarted):
+            self.crawl = None
             self.current = f"{e.tool} {self.short(e.url)}"
         elif isinstance(e, StepFinished):
             line = Text(self.step_line(e), style=None if e.ok else "yellow")
@@ -140,7 +153,11 @@ class LiveUI(_Formatter):
             self.current = ""
             self.pages = (e.pages_used, e.max_pages)
             self.tally = dict(e.tally)
+        elif isinstance(e, CrawlProgress):
+            self.crawl = e
+            self.pages = (e.pages_done, self.pages[1])
         elif isinstance(e, TriageStarted):
+            self.crawl = None
             self.current = self.triage_line(e)
         elif isinstance(e, ScanFinished):
             self.current = ""
