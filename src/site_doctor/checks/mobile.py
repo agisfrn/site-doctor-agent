@@ -12,7 +12,8 @@ def check(cap: PageCapture) -> list[Finding]:
                              "phones will show a shrunken desktop page"))
     if m is None:
         return found
-    if m.doc_width > m.viewport_width + 1:
+    # Without a viewport tag the phone renders a ~980px desktop layout; that's the finding above.
+    if cap.meta.get("viewport") and m.doc_width > m.viewport_width + 1:
         found.append(Finding("mobile.horizontal-scroll", "mobile", "high",
                              "Page scrolls sideways on phones", url,
                              f"page is {m.doc_width}px wide on a {m.viewport_width}px screen"))

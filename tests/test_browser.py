@@ -1,12 +1,6 @@
 import pytest
 
-from site_doctor.browser import Browser, PageLoadError
-
-
-@pytest.fixture(scope="module")
-def browser():
-    with Browser() as b:
-        yield b
+from site_doctor.browser import PageLoadError
 
 
 def test_capture_collects_page_data(browser, demo_url):

@@ -31,7 +31,8 @@ def check(cap: PageCapture) -> list[Finding]:
     sizes = {r.url: r.transfer_size for r in cap.resources}
     seen = set()
     for img in cap.images:
-        if img.src in seen:
+        # Vector images scale freely, and the browser invents a 300×150 "natural" size for them.
+        if img.src in seen or img.src.split("?")[0].lower().endswith(".svg"):
             continue
         seen.add(img.src)
         size = sizes.get(img.src, 0)

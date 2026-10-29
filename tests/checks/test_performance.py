@@ -43,3 +43,9 @@ def test_image_scaled_down_more_than_twice_is_oversized():
 
 def test_missing_timings_produce_nothing():
     assert performance.check(make_capture(timings=Timings(None, None, None, None))) == []
+
+
+def test_svg_images_are_never_oversized():
+    cap = make_capture(images=[Image("https://a.com/leaf.svg", 300, 150, 48, 48)],
+                       resources=[Resource("https://a.com/leaf.svg", "img", 300)])
+    assert performance.check(cap) == []

@@ -84,7 +84,8 @@ MOBILE_JS = """() => {
     if (r.width === 0 || r.height === 0) return false;
     return (r.width < 24 && r.height < 24) || r.height < 12;
   }).length;
-  return {doc_width: document.documentElement.scrollWidth, viewport_width: window.innerWidth,
+  // screen.width, not innerWidth: phones zoom out to fit wide pages, which grows innerWidth.
+  return {doc_width: document.documentElement.scrollWidth, viewport_width: screen.width,
           small_tap_targets: small};
 }"""
 
@@ -98,8 +99,19 @@ def _first_line(e: BaseException) -> str:
     return text.splitlines()[0] if text else type(e).__name__
 
 
+AXE_PATH = Path(__file__).parent / "checks" / "vendor" / "axe.min.js"
+AXE_JS = """async () => {
+  const r = await axe.run(document, {resultTypes: ["violations"]});
+  return r.violations.map(v => ({id: v.id, impact: v.impact, help: v.help, nodes: v.nodes.length}));
+}"""
+
+
 def run_axe(page: Page) -> list[dict]:
-    return []
+    try:
+        page.add_script_tag(path=str(AXE_PATH))
+        return page.evaluate(AXE_JS)
+    except PlaywrightError:
+        return []
 
 
 class Browser:

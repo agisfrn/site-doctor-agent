@@ -1,5 +1,6 @@
 import pytest
 
+from site_doctor.browser import Browser
 from site_doctor.demo_server import serve
 
 
@@ -7,3 +8,9 @@ from site_doctor.demo_server import serve
 def demo_url():
     with serve() as url:
         yield url
+
+
+@pytest.fixture(scope="session")
+def browser():
+    with Browser() as b:
+        yield b

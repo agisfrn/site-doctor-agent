@@ -18,3 +18,9 @@ def test_mobile_rules():
 def test_missing_viewport_is_reported_even_without_mobile_data():
     cap = make_capture(meta={**make_capture().meta, "viewport": None}, mobile=None)
     assert [f.id for f in mobile.check(cap)] == ["mobile.missing-viewport"]
+
+
+def test_no_viewport_page_is_not_also_reported_as_scrolling():
+    cap = make_capture(meta={**make_capture().meta, "viewport": None},
+                       mobile=MobileData(doc_width=980, viewport_width=390, small_tap_targets=0))
+    assert [f.id for f in mobile.check(cap)] == ["mobile.missing-viewport"]
