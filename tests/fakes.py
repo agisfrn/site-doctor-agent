@@ -27,10 +27,17 @@ def response(*blocks, stop="tool_use"):
 class FakeClient:
     """Plays back scripted responses. An Exception in the script is raised instead."""
 
-    def __init__(self, responses):
+    def __init__(self, responses, model_error=None):
         self.responses = list(responses)
         self.calls = []
         self.beta = SimpleNamespace(messages=self)
+        self.model_error = model_error
+        self.models = SimpleNamespace(retrieve=self._retrieve_model)
+
+    def _retrieve_model(self, model):
+        if self.model_error:
+            raise self.model_error
+        return SimpleNamespace(id=model)
 
     def create(self, **kw):
         self.calls.append({**kw, "messages": list(kw.get("messages", []))})
@@ -64,20 +71,6 @@ class FakeBrowser:
         path.write_bytes(b"\x89PNG\r\n\x1a\n")
         self.shots.append((url, mobile))
         return path
-
-
-class FakeBrowserCM(FakeBrowser):
-    """A FakeBrowser that can stand in for `with Browser(mobile=...) as b`."""
-
-    def __init__(self, mobile=True, pages=None, statuses=None):
-        super().__init__(pages, statuses)
-        self.mobile = mobile
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *exc):
-        pass
 
 
 def browser_raising(message: str):
@@ -129,3 +122,18 @@ class FakeCrawlBrowser(FakeBrowser):
 
     def fetch_text(self, url):
         return self.texts.get(url, (404, ""))
+
+
+class FakeBrowserCM(FakeCrawlBrowser):
+    """A FakeBrowser that can stand in for `with Browser(mobile=...) as b`."""
+
+    def __init__(self, mobile=True, pages=None, statuses=None, **kw):
+        super().__init__(pages, statuses)
+        self.kw = kw
+        self.mobile = mobile
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        pass

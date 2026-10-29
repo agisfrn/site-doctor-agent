@@ -4,7 +4,7 @@ from typer.testing import CliRunner
 
 from site_doctor import cli
 from site_doctor.cli import app
-from tests.fakes import FakeBrowserCM, browser_raising, raising_auth_error_client
+from tests.fakes import FakeBrowserCM, FakeClient, browser_raising, raising_auth_error_client
 
 runner = CliRunner()
 
@@ -42,7 +42,7 @@ def test_client_construction_failure_explains(monkeypatch, tmp_path):
 def test_missing_chromium_explains(monkeypatch, tmp_path):
     missing = browser_raising("Executable doesn't exist at /ms-playwright/chromium")
     monkeypatch.setattr(cli, "Browser", missing)
-    monkeypatch.setattr(cli.anthropic, "Anthropic", lambda: object())
+    monkeypatch.setattr(cli.anthropic, "Anthropic", lambda: FakeClient([]))
     res = runner.invoke(app, ["scan", "example.com", "--out", str(tmp_path), "--plain"])
     assert res.exit_code == 1 and "playwright install chromium" in res.output
 
@@ -99,3 +99,38 @@ def test_only_the_key_precedence_notice_is_silenced(caplog):
                     "ANTHROPIC_API_KEY", "ANTHROPIC_API_KEY")
         log.warning("Retrying request after rate limit")
     assert [r.getMessage() for r in caplog.records] == ["Retrying request after rate limit"]
+
+
+def test_max_pages_default_and_limit_depend_on_mode(monkeypatch, tmp_path, sample_result):
+    seen = []
+
+    def fake_scan(client, browser, config, on_event):
+        seen.append(config)
+        return sample_result
+
+    monkeypatch.setattr(cli, "Browser", FakeBrowserCM)
+    monkeypatch.setattr(cli.anthropic, "Anthropic", lambda: FakeClient([]))
+    monkeypatch.setattr(cli.runner, "scan", fake_scan)
+    base = ["scan", "example.com", "--out", str(tmp_path), "--plain"]
+    assert runner.invoke(app, base).exit_code == 0
+    assert runner.invoke(app, [*base, "--mode", "smart", "--concurrency", "2"]).exit_code == 0
+    assert [(c.mode, c.max_pages) for c in seen] == [("full", 200), ("smart", 15)]
+    assert seen[1].concurrency == 2
+    res = runner.invoke(app, [*base, "--mode", "smart", "--max-pages", "500"])
+    assert res.exit_code != 0 and "100" in res.output
+
+
+def test_bad_model_fails_before_crawling(monkeypatch, tmp_path):
+    import httpx2
+
+    from tests.fakes import FakeClient
+
+    request = httpx2.Request("GET", "https://api.anthropic.com/v1/models/claude-typo")
+    error = cli.anthropic.NotFoundError("model: claude-typo",
+                                        response=httpx2.Response(404, request=request), body=None)
+    browsers = []
+    monkeypatch.setattr(cli, "Browser", lambda **kw: browsers.append(kw) or FakeBrowserCM(**kw))
+    monkeypatch.setattr(cli.anthropic, "Anthropic", lambda: FakeClient([], model_error=error))
+    res = runner.invoke(app, ["scan", "example.com", "--model", "claude-typo",
+                              "--out", str(tmp_path), "--plain"])
+    assert res.exit_code == 1 and "claude-typo" in res.output and browsers == []

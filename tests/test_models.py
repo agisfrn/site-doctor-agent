@@ -30,3 +30,10 @@ def test_normalize_target(raw, expected):
 def test_run_dir_uses_host_and_stamp():
     cfg = ScanConfig(url="http://127.0.0.1:8123/", stamp="20261029-100000")
     assert cfg.run_dir == Path("reports") / "127.0.0.1-8123-20261029-100000"
+
+
+def test_old_findings_json_without_mode_loads(sample_result):
+    d = sample_result.to_dict()
+    for key in ("mode", "links_checked", "page_groups"):
+        d.pop(key)
+    assert ScanResult.from_dict(d).mode == "full"
