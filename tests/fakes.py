@@ -35,7 +35,7 @@ class FakeClient:
     def create(self, **kw):
         self.calls.append({**kw, "messages": list(kw.get("messages", []))})
         item = self.responses.pop(0)
-        if isinstance(item, Exception):
+        if isinstance(item, BaseException):
             raise item
         return item
 

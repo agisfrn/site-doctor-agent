@@ -1,9 +1,13 @@
 import json
 
+import anthropic
+import httpx2 as httpx
+import pytest
+
 from site_doctor.agent import Agent, normalize_url
 from site_doctor.browser import PageLoadError
 from site_doctor.config import ScanConfig
-from site_doctor.events import StepFinished, StepStarted
+from site_doctor.events import ScanFinished, StepFinished, StepStarted, TriageStarted
 from tests.checks.helpers import make_capture
 from tests.fakes import FakeBrowser, FakeClient, response, text, tool_use
 
@@ -42,6 +46,7 @@ def test_crawl_opens_pages_and_finishes(tmp_path):
         response(text("Starting with the home page."), tool_use("open_page", url="https://a.com/")),
         response(tool_use("check_link", url="https://a.com/missing", found_on="https://a.com/")),
         response(tool_use("finish", summary="done")),
+        response(text("not json"), stop="end_turn"),  # the triage call (see Task 10 tests)
     ]
     pages = {"https://a.com/": page("https://a.com/", links=["https://a.com/missing"])}
     agent, client, browser, events = make_agent(script, pages, tmp_path,
@@ -52,7 +57,7 @@ def test_crawl_opens_pages_and_finishes(tmp_path):
     assert [e.step for e in events if isinstance(e, StepStarted)] == [1, 2, 3]
     finished = [e for e in events if isinstance(e, StepFinished)]
     assert finished[1].summary == "404 ✗ broken"
-    assert len(client.calls) == 3
+    assert len(client.calls) == 4
 
 
 def test_open_page_summary_lists_links_and_counts(tmp_path):
@@ -183,3 +188,95 @@ def test_usage_is_accumulated(tmp_path):
     agent, *_ = make_agent(script, {}, tmp_path)
     usage = agent.run().usage
     assert (usage.input_tokens, usage.output_tokens) == (200, 40)
+
+
+# --- Task 10: triage call and partial runs -------------------------------------------------
+
+REQUEST = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+CRAWL = [
+    response(tool_use("open_page", url="https://a.com/")),
+    response(tool_use("check_link", url="https://a.com/missing")),
+    response(tool_use("finish", summary="done")),
+]
+
+
+def crawl_agent(tmp_path, *after):
+    pages = {"https://a.com/": page("https://a.com/")}
+    return make_agent(CRAWL + list(after), pages, tmp_path,
+                      statuses={"https://a.com/missing": 404})
+
+
+def test_triage_fills_explanations_and_ignores_unknown_ids(tmp_path):
+    triage = json.dumps({"summary": "S", "issues": [
+        {"id": "links.broken-internal", "explanation": "E", "fix": "F"},
+        {"id": "nope", "explanation": "x", "fix": "y"}]})
+    agent, client, _, events = crawl_agent(tmp_path, response(text(triage), stop="end_turn"))
+    result = agent.run()
+    group = next(g for g in result.groups if g.id == "links.broken-internal")
+    assert (group.explanation, group.fix) == ("E", "F")
+    assert result.summary == "S" and not result.partial
+    others = [g for g in result.groups if g.id != "links.broken-internal"]
+    assert all(g.explanation == "" for g in others)
+    last = client.calls[-1]
+    assert last["output_config"]["format"]["type"] == "json_schema" and "tools" not in last
+    assert any(isinstance(e, TriageStarted) for e in events)
+
+
+def test_bad_triage_json_keeps_report(tmp_path):
+    agent, *_ = crawl_agent(tmp_path, response(text("not json"), stop="end_turn"))
+    result = agent.run()
+    assert result.summary == "done" and not result.partial
+    assert all(g.explanation == "" for g in result.groups)
+
+
+def test_triage_refusal_keeps_report(tmp_path):
+    agent, *_ = crawl_agent(tmp_path, response(stop="refusal"))
+    result = agent.run()
+    assert result.summary == "done" and not result.partial
+
+
+def test_triage_api_error_keeps_report(tmp_path):
+    agent, *_ = crawl_agent(tmp_path, anthropic.APIConnectionError(request=REQUEST))
+    result = agent.run()
+    assert result.summary == "done" and not result.partial
+
+
+def test_api_error_gives_partial_result_without_triage(tmp_path):
+    script = [response(tool_use("open_page", url="https://a.com/")),
+              anthropic.APIConnectionError(request=REQUEST)]
+    pages = {"https://a.com/": page("https://a.com/", page_errors=["boom"])}
+    agent, client, _, events = make_agent(script, pages, tmp_path)
+    result = agent.run()
+    assert result.partial and result.partial_reason.startswith("API error")
+    assert "basics.js-error" in {f.id for f in result.findings}
+    assert len(client.calls) == 2
+    assert events[-1] == ScanFinished(True, result.partial_reason)
+
+
+def test_refusal_during_crawl_is_partial(tmp_path):
+    agent, client, *_ = make_agent([response(stop="refusal")], {}, tmp_path)
+    result = agent.run()
+    assert (result.partial, result.partial_reason) == (True, "model declined")
+    assert len(client.calls) == 1
+
+
+def test_ctrl_c_is_partial(tmp_path):
+    script = [response(tool_use("open_page", url="https://a.com/")), KeyboardInterrupt()]
+    agent, client, *_ = make_agent(script, {"https://a.com/": page("https://a.com/")}, tmp_path)
+    result = agent.run()
+    assert (result.partial, result.partial_reason) == (True, "interrupted")
+    assert len(result.pages) == 1 and len(client.calls) == 2
+
+
+def test_auth_error_propagates(tmp_path):
+    err = anthropic.AuthenticationError(
+        "invalid x-api-key", response=httpx.Response(401, request=REQUEST), body=None)
+    agent, *_ = make_agent([err], {}, tmp_path)
+    with pytest.raises(anthropic.AuthenticationError):
+        agent.run()
+
+
+def test_no_findings_means_no_triage_call(tmp_path):
+    script = [response(tool_use("finish", summary="nothing to see"))]
+    agent, client, *_ = make_agent(script, {}, tmp_path)
+    assert agent.run().summary == "nothing to see" and len(client.calls) == 1

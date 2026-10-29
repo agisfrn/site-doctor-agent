@@ -10,11 +10,21 @@ from collections.abc import Callable
 from datetime import datetime
 from urllib.parse import urlsplit, urlunsplit
 
+import anthropic
+
 from .browser import PageLoadError
 from .checks import basics, links, run_page_checks, seo
 from .config import ScanConfig
-from .events import AgentNote, Event, ScanFinished, ScanStarted, StepFinished, StepStarted
-from .models import SEVERITIES, Finding, PageResult, ScanResult, Usage
+from .events import (
+    AgentNote,
+    Event,
+    ScanFinished,
+    ScanStarted,
+    StepFinished,
+    StepStarted,
+    TriageStarted,
+)
+from .models import SEVERITIES, Finding, IssueGroup, PageResult, ScanResult, Usage
 from .scoring import score
 from .triage import group_findings
 
@@ -72,6 +82,31 @@ key landing pages, and pages from different sections or templates.
 - Take a screenshot of every page where you see critical or high issues.
 - Call finish with a short summary when you've covered the site or the budget is used up.
 Keep any text between tool calls to one short sentence."""
+
+
+TRIAGE_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["summary", "issues"],
+    "properties": {
+        "summary": {"type": "string"},
+        "issues": {"type": "array", "items": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["id", "explanation", "fix"],
+            "properties": {"id": {"type": "string"}, "explanation": {"type": "string"},
+                           "fix": {"type": "string"}},
+        }},
+    },
+}
+
+TRIAGE_SYSTEM = """You are Site Doctor, writing the report for a website examination.
+You get the issues the automated checks found (already de-duplicated and graded) and the \
+crawl notes. For every issue, write:
+- explanation: one or two plain-English sentences on what's wrong and who it affects.
+- fix: a concrete, specific fix a developer can act on (name the header, tag or setting).
+Then write summary: three or four sentences for the site owner on overall health and what to \
+fix first. Don't change severities, don't invent issues, and keep each issue's id exactly."""
 
 
 def normalize_url(url: str) -> str:
@@ -134,6 +169,9 @@ class Agent:
             for block in response.content:
                 if block.type == "text" and block.text.strip():
                     self.emit(AgentNote(block.text.strip()))
+            if response.stop_reason == "refusal":
+                self.partial_reason = "model declined"
+                return
             if response.stop_reason != "tool_use":
                 return
 
@@ -254,6 +292,31 @@ class Agent:
         self.finished = True
         return {"ok": True}, "done"
 
+    def _explain(self, groups: list[IssueGroup], crawl_summary: str) -> str:
+        """Ask Claude to explain each issue. Fills groups in place; returns the overall summary."""
+        issues = [{"id": g.id, "category": g.category, "severity": g.severity, "title": g.title,
+                   "pages": len(g.urls), "urls": g.urls[:5], "evidence": g.evidence}
+                  for g in groups]
+        content = (f"Site: {self.config.url}\nCrawl notes: {crawl_summary or '(none)'}\n\n"
+                   f"Issues:\n{json.dumps(issues, indent=1)}")
+        try:
+            response = self._create(
+                system=TRIAGE_SYSTEM, messages=[{"role": "user", "content": content}],
+                output_config={"effort": self.config.effort,
+                               "format": {"type": "json_schema", "schema": TRIAGE_SCHEMA}})
+            if response.stop_reason == "refusal":
+                return crawl_summary
+            data = json.loads(next(b.text for b in response.content if b.type == "text"))
+        except Exception:  # the report is still useful without explanations
+            return crawl_summary
+        by_id = {g.id: g for g in groups}
+        for item in data.get("issues", []):
+            group = by_id.get(item.get("id"))
+            if group:
+                group.explanation = str(item.get("explanation", ""))
+                group.fix = str(item.get("fix", ""))
+        return str(data.get("summary") or crawl_summary)
+
     # --- results ----------------------------------------------------------------------------
 
     def _all_findings(self) -> list[Finding]:
@@ -271,17 +334,29 @@ class Agent:
         started = datetime.now()
         t0 = time.perf_counter()
         self.emit(ScanStarted(self.config.url, self.config.model, self.config.max_pages))
-        self._crawl()
+        try:
+            self._crawl()
+        except (anthropic.AuthenticationError, anthropic.PermissionDeniedError):
+            raise
+        except anthropic.APIError as e:
+            self.partial_reason = f"API error: {e}"
+        except KeyboardInterrupt:
+            self.partial_reason = "interrupted"
+
         findings = self._all_findings()
         groups = group_findings(findings)
-        scores, overall, grade = score(groups)
         partial = bool(self.partial_reason)
+        summary = self.crawl_summary
+        if groups and not partial:
+            self.emit(TriageStarted(len(groups)))
+            summary = self._explain(groups, summary)
+        scores, overall, grade = score(groups)
         self.emit(ScanFinished(partial, self.partial_reason))
         return ScanResult(
             target=self.config.url, model=self.config.model,
             started_at=started.isoformat(timespec="seconds"),
             duration_s=round(time.perf_counter() - t0, 1),
             pages=list(self.pages.values()), findings=findings, groups=groups,
-            scores=scores, overall=overall, grade=grade, summary=self.crawl_summary,
+            scores=scores, overall=overall, grade=grade, summary=summary,
             usage=self.usage, partial=partial, partial_reason=self.partial_reason,
         )
